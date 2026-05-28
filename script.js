@@ -15,6 +15,16 @@ const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)
 const PX_PER_FRAME = 18;
 const BRIDGE_VIEWPORT_RATIO = 0.86;
 const SCENE_TEXT_REVEAL_AT = 0.08;
+const MOBILE_MQ = window.matchMedia("(max-width: 640px)");
+const MOBILE_PX_PER_FRAME_FACTOR = 1.55;
+const MOBILE_FRAME_LERP = 0.1;
+const DESKTOP_FRAME_LERP = 0.16;
+const MOBILE_BRIDGE_VIEWPORT_RATIO = 1.05;
+const MOBILE_HOLD_RATIO_FACTOR = 1.35;
+
+function isMobileViewport() {
+  return MOBILE_MQ.matches;
+}
 
 const BRIDGE_HOLD_END = 0;
 const BRIDGE_FADE_TO_BLACK_END = 0.28;
@@ -136,7 +146,9 @@ function buildZones() {
       const start = Number(element.dataset.frameStart);
       const end = Number(element.dataset.frameEnd);
       const length = end - start + 1;
-      const pxPerFrame = Number(element.dataset.pxPerFrame ?? PX_PER_FRAME);
+      const pxPerFrame =
+        Number(element.dataset.pxPerFrame ?? PX_PER_FRAME) *
+        (isMobileViewport() ? MOBILE_PX_PER_FRAME_FACTOR : 1);
       const panelCount = element.querySelectorAll(".panel").length || 1;
       const contentHeight = panelCount * window.innerHeight;
       const frameHeight = length * pxPerFrame;
@@ -153,7 +165,8 @@ function buildZones() {
         if (panel) panel.style.minHeight = `${height}px`;
       }
     } else if (type === "bridge") {
-      height = Math.round(window.innerHeight * BRIDGE_VIEWPORT_RATIO);
+      const bridgeRatio = isMobileViewport() ? MOBILE_BRIDGE_VIEWPORT_RATIO : BRIDGE_VIEWPORT_RATIO;
+      height = Math.round(window.innerHeight * bridgeRatio);
       zone.holdFrame = Number(element.dataset.holdFrame);
       zone.holdBase = element.dataset.holdBase || defaultFrameBase;
       zone.nextFrame = Number(element.dataset.nextFrame);
@@ -164,7 +177,9 @@ function buildZones() {
       zone.titleEnd = numberOption(element.dataset.titleEnd, BRIDGE_TITLE_END);
       zone.fadeInEnd = numberOption(element.dataset.fadeInEnd, BRIDGE_FADE_IN_END);
     } else if (type === "hold") {
-      height = Math.round(window.innerHeight * Number(element.dataset.holdRatio ?? 1.18));
+      const holdRatio = Number(element.dataset.holdRatio ?? 1.18);
+      const mobileHoldFactor = isMobileViewport() ? MOBILE_HOLD_RATIO_FACTOR : 1;
+      height = Math.round(window.innerHeight * holdRatio * mobileHoldFactor);
       zone.frameBase = element.dataset.frameBase || defaultFrameBase;
       zone.holdFrame = Number(element.dataset.holdFrame ?? frameCount - 1);
       zone.loopStart = Number(element.dataset.loopStart ?? 0);
@@ -494,7 +509,8 @@ function tick() {
   }
 
   const delta = targetFrame - currentFrame;
-  currentFrame += prefersReducedMotion ? delta : delta * 0.16;
+  const frameLerp = isMobileViewport() ? MOBILE_FRAME_LERP : DESKTOP_FRAME_LERP;
+  currentFrame += prefersReducedMotion ? delta : delta * frameLerp;
 
   if (Math.abs(delta) < 0.08) {
     currentFrame = targetFrame;
@@ -524,6 +540,7 @@ function handleResize() {
 
 window.addEventListener("scroll", handleScroll, { passive: true });
 window.addEventListener("resize", handleResize);
+MOBILE_MQ.addEventListener("change", handleResize);
 
 window.addEventListener("pageshow", () => {
   if (location.hash) return;
