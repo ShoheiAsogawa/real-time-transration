@@ -1,0 +1,268 @@
+<!doctype html>
+  <html lang="ja">
+  <head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LinguaLive 管理画面</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .admin-login-wrap {
+      min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+  .admin-login-card {
+        background: var(--bg-elevated);
+    border: 1px solid var(--separator);
+    border-radius: 1.25rem;
+    padding: 2rem 1.75rem;
+    width: 100%;
+    max-width: 22rem;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.10);
+}
+  .admin-login-title {
+        font-size: 1.4rem;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 0.25rem;
+}
+  .admin-login-sub {
+        font-size: 0.875rem;
+    color: var(--ink-tertiary);
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+  .admin-field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.9rem; }
+  .admin-field label { font-size: 0.8125rem; font-weight: 600; color: var(--ink-secondary); }
+  .admin-field input {
+        height: 2.75rem; padding: 0 0.85rem;
+    border: 1px solid var(--separator); border-radius: 0.65rem;
+    background: var(--fill); font-size: 1rem; color: var(--ink);
+    outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+  .admin-field input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0,122,255,0.15); }
+  .admin-login-btn {
+        display: block; width: 100%; height: 3rem; margin-top: 1.25rem;
+    border: none; border-radius: 0.75rem; background: var(--blue); color: #fff;
+        font-size: 1rem; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s, transform 0.12s;
+}
+  .admin-login-btn:active { transform: scale(0.98); opacity: 0.85; }
+  .admin-login-btn:disabled { opacity: 0.55; }
+  .admin-login-err { color: #ff3b30; font-size: 0.8125rem; font-weight: 500; min-height: 1rem; margin-top: 0.5rem; text-align: center; }
+    </style>
+    </head>
+    <body>
+    <div class="admin-login-wrap" id="loginWrap">
+      <div class="admin-login-card">
+        <h1 class="admin-login-title">管理者ログイン</h1>
+        <p class="admin-login-sub">LinguaLive 管理画面</p>
+        <div class="admin-field">
+          <label for="adminEmail">メールアドレス</label>
+          <input id="adminEmail" type="email" autocomplete="email" required />
+        </div>
+        <div class="admin-field">
+          <label for="adminPassword">パスワード</label>
+          <input id="adminPassword" type="password" autocomplete="current-password" required />
+        </div>
+        <p class="admin-login-err" id="loginErr"></p>
+        <button class="admin-login-btn" id="loginBtn" type="button">ログイン</button>
+      </div>
+    </div>
+
+    <div class="app-shell is-hidden" id="adminPanel">
+      <main class="admin-view" id="adminView" style="position:relative;inset:unset;height:100svh;">
+        <header class="nav-bar">
+          <span class="nav-spacer"></span>
+          <h2 class="nav-title">管理<span>画面</span></h2>
+          <span class="nav-spacer"></span>
+        </header>
+        <div class="admin-content">
+          <div style="text-align:right;padding:0 0.25rem 0.5rem;">
+            <span id="adminEmailLabel" style="font-size:0.85rem;color:var(--ink-tertiary);margin-right:0.75rem;"></span>
+            <button class="logout-link" id="logoutBtn" type="button" style="margin:0;border-top:none;display:inline;padding:0.3rem 0.6rem;">ログアウト</button>
+          </div>
+
+          <section class="admin-section">
+            <h3 class="admin-section-title">ユーザーを追加</h3>
+            <div class="admin-add-form">
+              <div class="admin-add-row">
+                <input class="admin-input" id="newUserId" type="text" placeholder="アクセスID" autocapitalize="none" spellcheck="false" />
+                <select class="admin-select" id="newUserRole">
+                  <option value="user">ユーザー</option>
+                  <option value="admin">管理者</option>
+                </select>
+                <button class="admin-add-btn" id="addUserBtn" type="button">追加</button>
+              </div>
+              <p class="admin-add-message" id="addUserMessage" role="status"></p>
+            </div>
+          </section>
+
+          <section class="admin-section">
+            <h3 class="admin-section-title">ユーザー一覧</h3>
+            <div class="admin-user-list" id="adminUserList">
+              <p class="admin-loading">読み込み中...</p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="dialog-overlay is-hidden" id="dialogOverlay">
+      <div class="dialog">
+        <p class="dialog-message" id="dialogMessage"></p>
+        <div class="dialog-actions">
+          <button class="dialog-btn cancel" id="dialogCancel" type="button">キャンセル</button>
+          <button class="dialog-btn danger" id="dialogConfirm" type="button">削除</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module">
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+    credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+          ...options
+      });
+  const text = await res.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new Error(payload.error || "Request failed");
+  return payload;
+      }
+
+const loginWrap = document.querySelector("#loginWrap");
+const adminPanel = document.querySelector("#adminPanel");
+const adminEmailLabel = document.querySelector("#adminEmailLabel");
+const loginErr = document.querySelector("#loginErr");
+const loginBtn = document.querySelector("#loginBtn");
+const logoutBtn = document.querySelector("#logoutBtn");
+const adminUserList = document.querySelector("#adminUserList");
+const newUserId = document.querySelector("#newUserId");
+const newUserRole = document.querySelector("#newUserRole");
+const addUserBtn = document.querySelector("#addUserBtn");
+const addUserMessage = document.querySelector("#addUserMessage");
+const toast = document.querySelector("#toast");
+const dialogOverlay = document.querySelector("#dialogOverlay");
+const dialogMessage = document.querySelector("#dialogMessage");
+const dialogCancel = document.querySelector("#dialogCancel");
+const dialogConfirm = document.querySelector("#dialogConfirm");
+
+let toastTimer = null;
+function showToast(msg) {
+    toast.textContent = msg; toast.classList.add("is-visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2000);
+}
+
+let _confirmCb = null;
+function showConfirm(msg, cb) { dialogMessage.textContent = msg; _confirmCb = cb; dialogOverlay.classList.remove("is-hidden"); }
+function closeConfirm() { dialogOverlay.classList.add("is-hidden"); _confirmCb = null; }
+dialogCancel.addEventListener("click", closeConfirm);
+dialogConfirm.addEventListener("click", () => { const cb = _confirmCb; closeConfirm(); if (cb) cb(); });
+dialogOverlay.addEventListener("click", e => { if (e.target === dialogOverlay) closeConfirm(); });
+
+function showPanel(email) {
+    loginWrap.classList.add("is-hidden");
+  adminPanel.classList.remove("is-hidden");
+  adminEmailLabel.textContent = email;
+  loadUsers();
+}
+
+function showLogin() {
+    adminPanel.classList.add("is-hidden");
+  loginWrap.classList.remove("is-hidden");
+}
+
+async function handleLogin() {
+  const email = document.querySelector("#adminEmail").value.trim();
+  const password = document.querySelector("#adminPassword").value;
+  loginErr.textContent = "";
+  loginBtn.disabled = true;
+  try {
+    await api("/api/admin/login", { method: "POST", body: JSON.stringify({ email, password }) });
+    showPanel(email);
+  } catch (e) {
+    loginErr.textContent = e.message;
+  } finally {
+        loginBtn.disabled = false;
+}
+}
+
+document.querySelector("#adminPassword").addEventListener("keydown", e => { if (e.key === "Enter") handleLogin(); });
+loginBtn.addEventListener("click", handleLogin);
+
+logoutBtn.addEventListener("click", async () => {
+    await api("/api/admin/logout", { method: "POST", body: "{}" }).catch(() => {});
+  showLogin();
+});
+
+function renderUsers(users) {
+    adminUserList.innerHTML = "";
+  if (!users || users.length === 0) {
+    adminUserList.innerHTML = '<p class="admin-loading">ユーザーがいません</p>'; return;
+  }
+  for (const u of users) {
+        const row = document.createElement("div");
+    row.className = "admin-user-row";
+    const idEl = document.createElement("span");
+    idEl.className = "admin-user-id"; idEl.textContent = u.id;
+    const roleSelect = document.createElement("select");
+    roleSelect.className = `admin-role-select role-${u.role}`;
+    roleSelect.innerHTML = `<option value="user" ${u.role==="user"?"selected":""}>ユーザー</option><option value="admin" ${u.role==="admin"?"selected":""}>管理者</option>`;
+    roleSelect.addEventListener("change", async () => {
+            roleSelect.disabled = true;
+      try {
+        const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, { method: "PATCH", body: JSON.stringify({ role: roleSelect.value }) });
+        showToast("ロールを変更しました"); renderUsers(updated);
+      } catch (e) { showToast(e.message); roleSelect.value = u.role; roleSelect.disabled = false; }
+});
+    const delBtn = document.createElement("button");
+    delBtn.className = "admin-del-btn"; delBtn.type = "button"; delBtn.setAttribute("aria-label", "削除");
+    delBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    delBtn.addEventListener("click", () => {
+            showConfirm(`「${u.id}」を削除しますか？`, async () => {
+              try {
+                const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, { method: "DELETE" });
+          showToast("削除しました"); renderUsers(updated);
+} catch (e) { showToast(e.message); }
+});
+});
+    row.append(idEl, roleSelect, delBtn);
+    adminUserList.appendChild(row);
+}
+}
+
+async function loadUsers() {
+  adminUserList.innerHTML = '<p class="admin-loading">読み込み中...</p>';
+  try { const { users } = await api("/api/admin/users"); renderUsers(users); }
+  catch (e) { adminUserList.innerHTML = `<p class="admin-loading">エラー: ${e.message}</p>`; }
+}
+
+addUserBtn.addEventListener("click", async () => {
+  const id = newUserId.value.trim(); const role = newUserRole.value;
+  if (!id) { addUserMessage.textContent = "IDを入力してください"; return; }
+  addUserMessage.textContent = ""; addUserBtn.disabled = true;
+  try {
+    const { users } = await api("/api/admin/users", { method: "POST", body: JSON.stringify({ id, role }) });
+    newUserId.value = ""; newUserRole.value = "user";
+    showToast(`「${id}」を追加しました`); renderUsers(users);
+} catch (e) { addUserMessage.textContent = e.message; }
+  finally { addUserBtn.disabled = false; }
+});
+newUserId.addEventListener("keydown", e => { if (e.key === "Enter") addUserBtn.click(); });
+
+// 起動時: セッション確認
+try {
+  const { email } = await api("/api/admin/me");
+  showPanel(email);
+} catch {
+  showLogin();
+}
+</script>
+</body>
+</html>
