@@ -6,139 +6,174 @@
     <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <title>LinguaLive | Realtime Translator</title>
-    <meta
-      name="description"
-      content="OpenAI Realtime APIを使った、招待ID制のブラウザ向けリアルタイム翻訳Webアプリ。"
-    />
-    <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="icon" href="logo.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css" />
+  <meta name="description" content="OpenAI Realtime APIを使った、招待ID制のブラウザ向けリアルタイム翻訳Webアプリ。" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
-    <div class="app-shell">
+<body>
+  <div class="app-shell">
+
       <!-- ───────── ログイン ───────── -->
       <section class="auth-view" id="authView" aria-labelledby="loginTitle">
-        <div class="auth-hero">
-          <div class="app-icon" aria-hidden="true">
-            <svg width="80" height="80" viewBox="0 0 120 120" fill="none">
-              <defs>
-                <linearGradient id="bubbleTop" x1="20" y1="12" x2="72" y2="60" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#3F7CFF" />
-                  <stop offset="1" stop-color="#6A38E6" />
-                </linearGradient>
-                <linearGradient id="bubbleBot" x1="52" y1="56" x2="106" y2="104" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#23C4FF" />
-                  <stop offset="1" stop-color="#2E73FF" />
-                </linearGradient>
-                <linearGradient id="arrow" x1="8" y1="8" x2="112" y2="112" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#36A0FF" />
-                  <stop offset="1" stop-color="#1E5BFF" />
-                </linearGradient>
-              </defs>
-              <g stroke="url(#arrow)" stroke-width="7.5" stroke-linecap="round" fill="none">
-                <path d="M70 9 A52 52 0 0 1 112 55" />
-                <path d="M50 111 A52 52 0 0 1 8 65" />
-              </g>
-              <path fill="url(#arrow)" d="M112 55 l8 -3 l-10 -7 z" />
-              <path fill="url(#arrow)" d="M8 65 l-8 3 l10 7 z" />
-              <path fill="url(#bubbleBot)" d="M67 55 H91 a15 15 0 0 1 15 15 V83 a15 15 0 0 1 -15 15 H80 l-3 12 l-10 -12 H67 a15 15 0 0 1 -15 -15 V70 a15 15 0 0 1 15 -15 Z" />
-              <text x="79" y="86" text-anchor="middle" fill="#fff" font-family="'Hiragino Sans','Yu Gothic UI',sans-serif" font-size="30" font-weight="700">あ</text>
-              <path fill="url(#bubbleTop)" d="M33 13 H57 a15 15 0 0 1 15 15 V41 a15 15 0 0 1 -15 15 H42 l-10 12 l0 -12 H33 a15 15 0 0 1 -15 -15 V28 a15 15 0 0 1 15 -15 Z" />
-              <text x="45" y="45" text-anchor="middle" fill="#fff" font-family="-apple-system,'SF Pro Display',Arial,sans-serif" font-size="30" font-weight="800">A</text>
-            </svg>
-          </div>
-          <h1 id="loginTitle">LinguaLive</h1>
-          <p class="auth-subtitle">リアルタイム翻訳</p>
-        </div>
+            <div class="auth-hero">
+                    <div class="app-icon" aria-hidden="true">
+                              <svg width="80" height="80" viewBox="0 0 120 120" fill="none">
+                                          <defs>
+                                                        <linearGradient id="bubbleTop" x1="20" y1="12" x2="72" y2="60" gradientUnits="userSpaceOnUse">
+                                                                        <stop stop-color="#3F7CFF" /><stop offset="1" stop-color="#6A38E6" />
+                                                        </linearGradient>linearGradient>
+                                                        <linearGradient id="bubbleBot" x1="52" y1="56" x2="106" y2="104" gradientUnits="userSpaceOnUse">
+                                                                        <stop stop-color="#23C4FF" /><stop offset="1" stop-color="#2E73FF" />
+                                                        </linearGradient>linearGradient>
+                                                        <linearGradient id="arrow" x1="8" y1="8" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+                                                                        <stop stop-color="#36A0FF" /><stop offset="1" stop-color="#1E5BFF" />
+                                                        </linearGradient>linearGradient>
+                                          </defs>
+                                          <g stroke="url(#arrow)" stroke-width="7.5" stroke-linecap="round" fill="none">
+                                                        <path d="M70 9 A52 52 0 0 1 112 55" />
+                                                        <path d="M50 111 A52 52 0 0 1 8 65" />
+                                          </g>g>
+                                          <path fill="url(#arrow)" d="M112 55 l8 -3 l-10 -7 z" />
+                                          <path fill="url(#arrow)" d="M8 65 l-8 3 l10 7 z" />
+                                          <path fill="url(#bubbleBot)" d="M67 55 H91 a15 15 0 0 1 15 15 V83 a15 15 0 0 1 -15 15 H80 l-3 12 l-10 -12 H67 a15 15 0 0 1 -15 -15 V70 a15 15 0 0 1 15 -15 Z" />
+                                          <text x="79" y="86" text-anchor="middle" fill="#fff" font-family="'Hiragino Sans','Yu Gothic UI',sans-serif" font-size="30" font-weight="700">あ</text>text>
+                                          <path fill="url(#bubbleTop)" d="M33 13 H57 a15 15 0 0 1 15 15 V41 a15 15 0 0 1 -15 15 H42 l-10 12 l0 -12 H33 a15 15 0 0 1 -15 -15 V28 a15 15 0 0 1 15 -15 Z" />
+                                          <text x="45" y="45" text-anchor="middle" fill="#fff" font-family="-apple-system,'SF Pro Display',Arial,sans-serif" font-size="30" font-weight="800">A</text>text>
+                              </svg>svg>
+                    </div>div>
+                    <h1 id="loginTitle">LinguaLive</h1>h1>
+                    <p class="auth-subtitle">リアルタイム翻訳</p>p>
+            </div>div>
+            <div class="auth-form-area">
+                    <form class="form-group" id="loginForm" autocomplete="off">
+                              <div class="form-row">
+                                          <label for="accessId">アクセスID</label>label>
+                                          <input id="accessId" name="accessId" inputmode="text" autocapitalize="none" spellcheck="false" required />
+                              </div>div>
+                    </form>form>
+                    <p class="form-message" id="authMessage" role="status"></p>p>
+                    <button class="app-button primary" id="loginSubmit" type="button">ログイン</button>button>
+                    <p class="auth-footer">発行済みアクセスIDでログインできます。</p>p>
+            </div>div>
+      </section>section>
 
-        <div class="auth-form-area">
-          <form class="form-group" id="loginForm" autocomplete="off">
-            <div class="form-row">
-              <label for="accessId">アクセスID</label>
-              <input
-                id="accessId"
-                name="accessId"
-                inputmode="text"
-                autocapitalize="none"
-                spellcheck="false"
-                required
-              />
-            </div>
-          </form>
-          <p class="form-message" id="authMessage" role="status"></p>
-
-          <button class="app-button primary" id="loginSubmit" type="button">ログイン</button>
-
-          <p class="auth-footer">発行済みアクセスIDでログインできます。</p>
-        </div>
-      </section>
-
-      <!-- ───────── 翻訳 ───────── -->
+      <!-- ───────── 翻訳（一般ユーザー・管理者共通） ───────── -->
       <main class="translator-view is-hidden" id="translatorView">
+            <header class="nav-bar">
+                    <span class="nav-spacer" aria-hidden="true"></span>span>
+                    <h2 class="nav-title">Lingua<span>Live</span></h2>h2>
+                  <div class="nav-actions">
+                          <button class="nav-icon-button admin-only is-hidden" id="adminButton" type="button" aria-label="管理画面">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                                <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/>
+                                                <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>svg>
+                          </button>button>
+                          <button class="nav-icon-button" id="historyButton" type="button" aria-label="履歴">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+                                                <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>svg>
+                          </button>button>
+                  </div>div>
+            </header>header>
+          <div class="live-pill-wrap">
+                <div class="live-pill" id="livePill">
+                        <span class="live-dot"></span>
+                        <span id="connectionState">待機中</span>
+                </div>div>
+          </div>div>
+          <div class="chat-list" id="chatList" aria-live="polite"></div>div>
+          <div class="mic-dock">
+                <button class="mic-fab" id="micButton" type="button" aria-pressed="false">
+                        <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
+                                  <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+                                  <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                                  <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>svg>
+                        <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
+                                  <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+                        </svg>svg>
+                        <span class="visually-hidden" id="micLabel">タップして開始</span>
+                </button>button>
+          </div>div>
+          <audio id="remoteAudio" autoplay playsinline></audio>audio>
+      </main>main>
+  
+    <!-- ───────── 管理画面（adminのみ） ───────── -->
+    <main class="admin-view is-hidden" id="adminView">
         <header class="nav-bar">
-          <span class="nav-spacer" aria-hidden="true"></span>
-          <h2 class="nav-title">Lingua<span>Live</span></h2>
-          <button class="nav-icon-button" id="historyButton" type="button" aria-label="履歴">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
-              <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-        </header>
-
-        <div class="live-pill-wrap">
-          <div class="live-pill" id="livePill">
-            <span class="live-dot"></span>
-            <span id="connectionState">待機中</span>
-          </div>
-        </div>
-
-        <div class="chat-list" id="chatList" aria-live="polite">
-          <!-- 会話カードが JS で挿入されます -->
-        </div>
-
-        <div class="mic-dock">
-          <button class="mic-fab" id="micButton" type="button" aria-pressed="false">
-            <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
-              <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
-              <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-            <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
-              <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
-            </svg>
-            <span class="visually-hidden" id="micLabel">タップして開始</span>
-          </button>
-        </div>
-
-        <audio id="remoteAudio" autoplay playsinline></audio>
-      </main>
-
-      <!-- ───────── 履歴ドロワー ───────── -->
-      <div class="drawer-overlay" id="drawerOverlay" hidden></div>
-      <aside class="drawer" id="drawer" aria-label="翻訳履歴">
+              <button class="nav-icon-button" id="adminBackButton" type="button" aria-label="翻訳画面に戻る">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>svg>
+              </button>button>
+              <h2 class="nav-title">管理<span>画面</span></h2>h2>
+              <span class="nav-spacer" aria-hidden="true"></span>
+        </header>header>
+    
+        <div class="admin-content">
+              <section class="admin-section">
+                      <h3 class="admin-section-title">ユーザー一覧</h3>h3>
+                      <p class="admin-section-desc">環境変数 <code>ALLOWED_LOGIN_IDS</code> と <code>USER_ROLES</code> で管理されているユーザーです。</p>p>
+                      <div class="admin-user-list" id="adminUserList">
+                                <p class="admin-loading">読み込み中...</p>p>
+                      </div>div>
+              </section>section>
+        
+              <section class="admin-section">
+                      <h3 class="admin-section-title">ロール設定方法</h3>h3>
+                      <div class="admin-howto">
+                                <p>Cloudflare Pages の環境変数に以下を設定してください：</p>
+                                <div class="admin-code-block">
+                                            <p><strong>ALLOWED_LOGIN_IDS</strong></p>
+                                            <code>alice,bob,carol</code>
+                                            <p class="admin-code-desc">カンマ区切りでアクセスIDを列挙</p>
+                                </div>div>
+                                <div class="admin-code-block">
+                                            <p><strong>USER_ROLES</strong></p>
+                                            <code>alice:admin,bob:user,carol:user</code>
+                                            <p class="admin-code-desc">「ID:ロール」形式でカンマ区切り。未設定のIDは自動的に <strong>user</strong> になります。</p>
+                                </div>div>
+                                <p class="admin-note">※ 設定変更後は再デプロイが必要です。</p>
+                      </div>div>
+              </section>section>
+        
+              <div class="admin-logout-wrap">
+                      <button class="logout-link" id="adminLogoutButton" type="button">ログアウト</button>button>
+              </div>div>
+        </div>div>
+    </main>main>
+  
+    <!-- ───────── 履歴ドロワー ───────── -->
+    <div class="drawer-overlay" id="drawerOverlay" hidden></div>div>
+    <aside class="drawer" id="drawer" aria-label="翻訳履歴">
         <div class="drawer-header">
-          <h3>履歴</h3>
-          <button class="nav-icon-button" id="drawerClose" type="button" aria-label="閉じる">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </div>
+              <h3>履歴</h3>
+              <button class="nav-icon-button" id="drawerClose" type="button" aria-label="閉じる">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>svg>
+              </button>button>
+        </div>div>
         <button class="new-conv-button" id="newConversationButton" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          新しい会話
-        </button>
-        <div class="session-list" id="sessionList"></div>
-        <button class="logout-link" id="logoutButton" type="button">ログアウト</button>
-      </aside>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>svg>
+              新しい会話
+        </button>button>
+        <div class="session-list" id="sessionList"></div>div>
+        <button class="logout-link" id="logoutButton" type="button">ログアウト</button>button>
+    </aside>aside>
+  
+    <!-- トースト -->
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>div>
+  </div>div>
 
-      <!-- トースト -->
-      <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    </div>
-
-    <script src="script.js" type="module"></script>
-  </body>
-</html>
+<script src="script.js" type="module"></script>
+</body>
+</html>html></h3></strong></strong></p></p></code></code></span></span>
+                                          </defs>
+</body></title>
+  </head>
