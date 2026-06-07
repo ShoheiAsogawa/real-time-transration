@@ -9,6 +9,7 @@
     "check": "node --check server.js && node --check script.js && node --check functions/api/[[path]].js",
     "cf:dev": "npx wrangler pages dev . --kv=SESSION_KV",
     "cf:deploy": "npx wrangler pages deploy .",
-    "hash-id": "node -e \"const crypto=require('crypto'); const id=process.argv[1]; if(!id) throw new Error('Usage: npm run hash-id -- <ACCESS_ID>'); console.log(crypto.createHash('sha256').update(id).digest('hex'))\""
+    "hash-id": "node -e \"const crypto=require('crypto'); const id=process.argv[1]; if(!id) throw new Error('Usage: npm run hash-id -- <ACCESS_ID>'); console.log(crypto.createHash('sha256').update(id).digest('hex'))\"",
+    "hash-password": "node -e \"const crypto=require('crypto'); const p=process.argv[1]; if(!p) throw new Error('Usage: npm run hash-password -- <PASSWORD>'); const s=crypto.randomBytes(16).toString('hex'); const h=crypto.pbkdf2Sync(p,s,100000,32,'sha256').toString('hex'); console.log('100000:'+s+':'+h)\""
   }
 }

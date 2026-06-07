@@ -30,6 +30,73 @@ async function sha256(value) {
       return hex(await crypto.subtle.digest("SHA-256", textBytes(value)));
 }
 
+function normalizeEmail(value) {
+      return String(value || "").trim().toLowerCase();
+}
+
+async function hashPassword(password, salt) {
+      const key = await crypto.subtle.importKey("raw", textBytes(password), "PBKDF2", false, ["deriveBits"]);
+      const bits = await crypto.subtle.deriveBits(
+              {
+                        name: "PBKDF2",
+                        salt: textBytes(salt),
+                        iterations: 100000,
+                        hash: "SHA-256"
+              },
+              key,
+              256
+            );
+      return hex(bits);
+}
+
+function parsePasswordHash(storedHash) {
+  const value = String(storedHash || "").trim();
+  if (!value) return null;
+  const delimiter = value.includes(":") ? ":" : "$";
+  const parts = value.split(delimiter);
+  if (parts.length !== 3) return null;
+  const [iterations, salt, expectedHash] = parts;
+  if (!iterations || !salt || !expectedHash) return null;
+  return { iterations: Number(iterations), salt, expectedHash };
+}
+
+async function verifyPassword(password, storedHash) {
+  const parsed = parsePasswordHash(storedHash);
+  if (!parsed) return false;
+  const { iterations, salt, expectedHash } = parsed;
+  const key = await crypto.subtle.importKey("raw", textBytes(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: textBytes(salt),
+      iterations,
+      hash: "SHA-256"
+    },
+    key,
+    256
+  );
+  return constantTimeEqual(hex(bits), expectedHash);
+}
+
+function maskEmail(email) {
+      const normalized = normalizeEmail(email);
+      const [local, domain] = normalized.split("@");
+      if (!local || !domain) return "admin";
+      const maskedLocal = local.length <= 2 ? `${local[0]}*` : `${local.slice(0, 2)}***`;
+      return `${maskedLocal}@${domain}`;
+}
+
+async function verifyAdminCredentials(env, email, password) {
+      const configuredEmail = normalizeEmail(env.ADMIN_EMAIL);
+      const passwordHash = String(env.ADMIN_PASSWORD_HASH || "").trim();
+      const parsed = parsePasswordHash(passwordHash);
+      if (!configuredEmail || !parsed) return false;
+      const normalizedEmail = normalizeEmail(email);
+      if (normalizedEmail.length !== configuredEmail.length) return false;
+      if (!constantTimeEqual(normalizedEmail, configuredEmail)) return false;
+      return verifyPassword(String(password || ""), passwordHash);
+}
+
 async function sign(value, secret) {
       const key = await crypto.subtle.importKey(
               "raw",
@@ -55,28 +122,76 @@ function envList(env, key) {
         .filter(Boolean);
 }
 
+function idsMatch(storedId, candidate) {
+      const left = normalizeId(storedId);
+      const right = normalizeId(candidate);
+      if (!left || !right || left.length !== right.length) return false;
+      return constantTimeEqual(left, right);
+}
+
 // ─── ユーザー管理（KV永続化） ───
 
-// KVからユーザー一覧を取得。未設定時はwrangler.tomlの値で初期化
+function buildSeedUsers(env) {
+      const envIds = envList(env, "ALLOWED_LOGIN_IDS");
+      return envIds.map((id) => ({
+              id: normalizeId(id),
+              role: "user",
+              seeded: true
+      })).filter((user) => user.id);
+}
+
+function normalizeUserRecord(user, envIds) {
+      const id = normalizeId(user?.id);
+      if (!id) return null;
+      return {
+              id,
+              role: "user",
+              seeded: envIds.some((envId) => idsMatch(envId, id))
+      };
+}
+
+function sortUsers(users) {
+      return [...users].sort((a, b) => a.id.localeCompare(b.id, "ja"));
+}
+
+function dedupeUsers(users) {
+      const byId = new Map();
+      for (const user of users) {
+              const existing = byId.get(user.id);
+              if (!existing || user.seeded) byId.set(user.id, user);
+      }
+      return [...byId.values()];
+}
+
+// KVからユーザー一覧を取得。不足分は wrangler.toml の ALLOWED_LOGIN_IDS で補完
 async function getUsers(env) {
       const kv = requireKv(env);
+      const envIds = envList(env, "ALLOWED_LOGIN_IDS").map((id) => normalizeId(id)).filter(Boolean);
       const stored = await kv.get(USERS_KV_KEY, "json");
-      if (stored && Array.isArray(stored)) return stored;
 
-  // 初回: wrangler.toml の ALLOWED_LOGIN_IDS / USER_ROLES から初期データ生成
-  const roleMap = {};
-      for (const entry of envList(env, "USER_ROLES")) {
-              const idx = entry.lastIndexOf(":");
-              if (idx < 1) continue;
-              roleMap[entry.slice(0, idx).trim()] = entry.slice(idx + 1).trim().toLowerCase();
+      let users = Array.isArray(stored)
+              ? stored
+                      .map((user) => normalizeUserRecord(user, envIds))
+                      .filter(Boolean)
+              : buildSeedUsers(env);
+
+      let changed = !Array.isArray(stored);
+
+      for (const id of envIds) {
+              if (!users.some((user) => idsMatch(user.id, id))) {
+                        users.push({ id, role: "user", seeded: true });
+                        changed = true;
+              }
       }
-      const users = envList(env, "ALLOWED_LOGIN_IDS").map((id) => ({
-              id,
-              role: roleMap[id] || "user"
-      }));
-      if (users.length > 0) {
+
+      const deduped = dedupeUsers(users);
+      if (deduped.length !== users.length) changed = true;
+      users = sortUsers(deduped);
+
+      if (changed) {
               await kv.put(USERS_KV_KEY, JSON.stringify(users));
       }
+
       return users;
 }
 
@@ -87,20 +202,20 @@ async function saveUsers(env, users) {
 async function isAllowedAccessId(env, accessId) {
       const normalized = normalizeId(accessId);
       if (!normalized || normalized.length > 128) return false;
-      const users = await getUsers(env);
-      return users.some((u) => constantTimeEqual(u.id, normalized));
-}
 
-async function getRoleForAccessId(env, accessId) {
-      const normalized = normalizeId(accessId);
+      // wrangler.toml の ALLOWED_LOGIN_IDS は常に許可（KV 未同期でもログイン可能）
+      if (envList(env, "ALLOWED_LOGIN_IDS").some((id) => idsMatch(id, normalized))) {
+              return true;
+      }
+
       const users = await getUsers(env);
-      const user = users.find((u) => constantTimeEqual(u.id, normalized));
-      return user ? user.role : "user";
+      return users.some((user) => idsMatch(user.id, normalized));
 }
 
 function maskAccessId(accessId) {
       const id = normalizeId(accessId);
-      if (id.length <= 6) return "issued-id";
+      if (id.length <= 2) return "•••";
+      if (id.length <= 6) return `${id[0]}${"•".repeat(Math.max(1, id.length - 2))}${id[id.length - 1]}`;
       return `${id.slice(0, 4)}...${id.slice(-2)}`;
 }
 
@@ -145,7 +260,11 @@ async function readJson(request) {
       const raw = await request.text();
       if (!raw) return {};
       if (raw.length > 4096) throw new Error("Payload too large");
-      return JSON.parse(raw);
+      try {
+              return JSON.parse(raw);
+      } catch {
+              throw new Error("Invalid JSON payload");
+      }
 }
 
 function assertSameOrigin(request, env) {
@@ -177,11 +296,10 @@ async function getSession(request, env) {
 
 async function setSession(request, env, accessId) {
       const sessionId = randomId();
-      const role = await getRoleForAccessId(env, accessId);
       const session = {
               accessIdHash: await sha256(accessId),
               label: maskAccessId(accessId),
-              role,
+              role: "user",
               createdAt: Date.now()
       };
       await requireKv(env).put(`session:${sessionId}`, JSON.stringify(session), {
@@ -193,16 +311,39 @@ async function setSession(request, env, accessId) {
       };
 }
 
-async function checkRateLimit(request, env) {
+async function setAdminSession(request, env, email) {
+      const sessionId = randomId();
+      const session = {
+              adminEmailHash: await sha256(normalizeEmail(email)),
+              label: maskEmail(email),
+              role: "admin",
+              createdAt: Date.now()
+      };
+      await requireKv(env).put(`session:${sessionId}`, JSON.stringify(session), {
+              expirationTtl: SESSION_TTL_SECONDS
+      });
+      return {
+              session,
+              cookie: sessionCookie(request, `${sessionId}.${await sign(sessionId, env.SESSION_SECRET || "dev-insecure-session-secret")}`)
+      };
+}
+
+async function isAuthRateLimited(request, env) {
       const windowMs = Number(env.AUTH_WINDOW_MS || 15 * 60 * 1000);
       const maxAttempts = Number(env.AUTH_MAX_ATTEMPTS || 8);
-      const bucketKey = `rate:${await sha256(`${clientIp(request)}:${Math.floor(Date.now() / windowMs)}`)}`;
+      const bucketKey = `auth-fail:${await sha256(`${clientIp(request)}:${Math.floor(Date.now() / windowMs)}`)}`;
+      const current = Number((await requireKv(env).get(bucketKey)) || 0);
+      return current >= maxAttempts;
+}
+
+async function recordFailedAuthAttempt(request, env) {
+      const windowMs = Number(env.AUTH_WINDOW_MS || 15 * 60 * 1000);
+      const bucketKey = `auth-fail:${await sha256(`${clientIp(request)}:${Math.floor(Date.now() / windowMs)}`)}`;
       const kv = requireKv(env);
       const current = Number((await kv.get(bucketKey)) || 0) + 1;
       await kv.put(bucketKey, String(current), {
               expirationTtl: Math.max(60, Math.ceil(windowMs / 1000))
       });
-      return current <= maxAttempts;
 }
 
 function buildRealtimeInstructions() {
@@ -265,14 +406,30 @@ async function routeApi(request, env) {
 
   // /api/login
   if (url.pathname === "/api/login" && request.method === "POST") {
-          if (!(await checkRateLimit(request, env))) {
+          if (await isAuthRateLimited(request, env)) {
                     return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
           }
           const { accessId } = await readJson(request);
           if (!(await isAllowedAccessId(env, accessId))) {
+                    await recordFailedAuthAttempt(request, env);
                     return json({ error: "このアクセスIDではログインできません。" }, 401);
           }
           const { session, cookie } = await setSession(request, env, accessId);
+          return json({ user: { id: session.label, role: session.role } }, 200, { "Set-Cookie": cookie });
+  }
+
+  // /api/admin/login
+  if (url.pathname === "/api/admin/login" && request.method === "POST") {
+          if (await isAuthRateLimited(request, env)) {
+                    return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
+          }
+          const { email, password } = await readJson(request);
+          const valid = await verifyAdminCredentials(env, email, password);
+          if (!valid) {
+                    await recordFailedAuthAttempt(request, env);
+                    return json({ error: "メールアドレスまたはパスワードが正しくありません。" }, 401);
+          }
+          const { session, cookie } = await setAdminSession(request, env, email);
           return json({ user: { id: session.label, role: session.role } }, 200, { "Set-Cookie": cookie });
   }
 
@@ -309,36 +466,17 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
 
-        const { id, role } = await readJson(request);
+        const { id } = await readJson(request);
           const normalizedId = normalizeId(id);
           if (!normalizedId || normalizedId.length > 128) {
                     return json({ error: "IDが無効です" }, 400);
           }
-          const validRole = role === "admin" ? "admin" : "user";
 
         const users = await getUsers(env);
-          if (users.some((u) => u.id === normalizedId)) {
+          if (users.some((user) => idsMatch(user.id, normalizedId))) {
                     return json({ error: "そのIDはすでに存在します" }, 409);
           }
-          users.push({ id: normalizedId, role: validRole });
-          await saveUsers(env, users);
-          return json({ ok: true, users });
-  }
-
-  // PATCH /api/admin/users/:id  ロール変更
-  if (url.pathname.startsWith("/api/admin/users/") && request.method === "PATCH") {
-          const session = await getSession(request, env);
-          if (!session) return json({ error: "Not authenticated" }, 401);
-          if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
-
-        const targetId = decodeURIComponent(url.pathname.replace("/api/admin/users/", ""));
-          const { role } = await readJson(request);
-          const validRole = role === "admin" ? "admin" : "user";
-
-        const users = await getUsers(env);
-          const idx = users.findIndex((u) => u.id === targetId);
-          if (idx < 0) return json({ error: "ユーザーが見つかりません" }, 404);
-          users[idx].role = validRole;
+          users.push({ id: normalizedId, role: "user", seeded: false });
           await saveUsers(env, users);
           return json({ ok: true, users });
   }
@@ -351,15 +489,12 @@ async function routeApi(request, env) {
 
         const targetId = decodeURIComponent(url.pathname.replace("/api/admin/users/", ""));
 
-        // 自分自身は削除不可
-        const myHash = session.accessIdHash;
-          const targetHash = await sha256(targetId);
-          if (constantTimeEqual(myHash, targetHash)) {
-                    return json({ error: "自分自身は削除できません" }, 400);
-          }
+        if (envList(env, "ALLOWED_LOGIN_IDS").some((id) => idsMatch(id, targetId))) {
+                  return json({ error: "環境設定で定義されたIDは削除できません。" }, 403);
+        }
 
         const users = await getUsers(env);
-          const filtered = users.filter((u) => u.id !== targetId);
+          const filtered = users.filter((u) => !idsMatch(u.id, targetId));
           if (filtered.length === users.length) return json({ error: "ユーザーが見つかりません" }, 404);
           await saveUsers(env, filtered);
           return json({ ok: true, users: filtered });
@@ -372,6 +507,8 @@ export async function onRequest(context) {
       try {
               return await routeApi(context.request, context.env);
       } catch (error) {
-              return json({ error: error.message || "Server error" }, 500);
+              const message = error.message || "Server error";
+              const status = message === "Invalid JSON payload" || message === "Payload too large" ? 400 : 500;
+              return json({ error: message }, status);
       }
 }

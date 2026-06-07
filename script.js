@@ -4,29 +4,52 @@ const state = {
       pc: null, dc: null, stream: null, user: null,
       turns: [], activeTurn: null,
       sessionId: null, sessionStartedAt: null,
-      viewingHistory: false
+      viewingHistory: false,
+      adminUsers: []
 };
 
 // DOM refs
 const authView = document.querySelector("#authView");
+const adminAuthView = document.querySelector("#adminAuthView");
 const translatorView = document.querySelector("#translatorView");
 const adminView = document.querySelector("#adminView");
 const loginForm = document.querySelector("#loginForm");
+const adminLoginForm = document.querySelector("#adminLoginForm");
 const accessIdInput = document.querySelector("#accessId");
+const pasteAccessIdBtn = document.querySelector("#pasteAccessId");
+const adminEmailInput = document.querySelector("#adminEmail");
+const adminPasswordInput = document.querySelector("#adminPassword");
 const authMessage = document.querySelector("#authMessage");
+const adminAuthMessage = document.querySelector("#adminAuthMessage");
 const loginSubmit = document.querySelector("#loginSubmit");
+const adminLoginSubmit = document.querySelector("#adminLoginSubmit");
+const showAdminLogin = document.querySelector("#showAdminLogin");
+const showUserLogin = document.querySelector("#showUserLogin");
 const logoutButton = document.querySelector("#logoutButton");
 const adminLogoutButton = document.querySelector("#adminLogoutButton");
 const micButton = document.querySelector("#micButton");
+const micHint = document.querySelector("#micHint");
 const micLabel = document.querySelector("#micLabel");
+const historyBanner = document.querySelector("#historyBanner");
+const resumeLiveBtn = document.querySelector("#resumeLiveBtn");
 const connectionState = document.querySelector("#connectionState");
 const chatList = document.querySelector("#chatList");
 const remoteAudio = document.querySelector("#remoteAudio");
-const adminButton = document.querySelector("#adminButton");
-const adminBackButton = document.querySelector("#adminBackButton");
 const adminUserList = document.querySelector("#adminUserList");
+const adminUserLabel = document.querySelector("#adminUserLabel");
+const adminUserCount = document.querySelector("#adminUserCount");
+const adminStatUsers = document.querySelector("#adminStatUsers");
+const adminStatVisible = document.querySelector("#adminStatVisible");
+const adminSearch = document.querySelector("#adminSearch");
+const adminSearchWrap = document.querySelector("#adminSearchWrap");
+const adminSearchClear = document.querySelector("#adminSearchClear");
+const adminListHead = document.querySelector("#adminListHead");
+const generateIdBtn = document.querySelector("#generateIdBtn");
+const quickAddBtn = document.querySelector("#quickAddBtn");
+const adminUserAvatar = document.querySelector("#adminUserAvatar");
+const adminRefreshBtn = document.querySelector("#adminRefreshBtn");
+const adminPasswordToggle = document.querySelector("#adminPasswordToggle");
 const newUserId = document.querySelector("#newUserId");
-const newUserRole = document.querySelector("#newUserRole");
 const addUserBtn = document.querySelector("#addUserBtn");
 const addUserMessage = document.querySelector("#addUserMessage");
 const historyButton = document.querySelector("#historyButton");
@@ -43,6 +66,10 @@ const dialogConfirm = document.querySelector("#dialogConfirm");
 
 /* ───────── API ───────── */
 
+function sortUsers(users) {
+      return [...(users || [])].sort((a, b) => a.id.localeCompare(b.id, "ja"));
+}
+
 async function api(path, options = {}) {
       const response = await fetch(path, {
               credentials: "same-origin",
@@ -50,9 +77,24 @@ async function api(path, options = {}) {
               ...options
       });
       const text = await response.text();
-      const payload = text ? JSON.parse(text) : {};
-      if (!response.ok) throw new Error(payload.error || "Request failed");
+      let payload = {};
+      if (text) {
+              try { payload = JSON.parse(text); }
+              catch { throw new Error("サーバー応答の解析に失敗しました"); }
+      }
+      if (!response.ok) {
+              if (response.status === 429) throw new Error(payload.error || "ログイン試行が多すぎます。しばらく待ってから再試行してください。");
+              throw new Error(payload.error || "Request failed");
+      }
       return payload;
+}
+
+function isAdminEntryHash() {
+      return location.hash === "#/admin" || location.hash === "#admin";
+}
+
+function clearAdminEntryHash() {
+      if (isAdminEntryHash()) history.replaceState(null, "", location.pathname);
 }
 
 /* ───────── 翻訳指示 ───────── */
@@ -74,89 +116,213 @@ function buildInstructions() {
 function setAuthenticated(user) {
       state.user = user;
       authView.classList.add("is-hidden");
+      adminAuthView.classList.add("is-hidden");
       adminView.classList.add("is-hidden");
-      if (user.role === "admin") {
-              if (adminButton) adminButton.classList.remove("is-hidden");
-      } else {
-              if (adminButton) adminButton.classList.add("is-hidden");
-      }
       translatorView.classList.remove("is-hidden");
+      clearAdminEntryHash();
       renderConversation();
       renderSessionList();
+      updateLiveUi();
 }
 
-function showAdminView() {
+function setAdminAuthenticated(user) {
+      state.user = user;
+      authView.classList.add("is-hidden");
+      adminAuthView.classList.add("is-hidden");
       translatorView.classList.add("is-hidden");
       adminView.classList.remove("is-hidden");
+      const label = user.id || "";
+      if (adminUserLabel) adminUserLabel.textContent = label;
+      if (adminUserAvatar) adminUserAvatar.textContent = label.charAt(0).toUpperCase() || "A";
+      clearAdminEntryHash();
       loadAdminUsers();
 }
 
-function showTranslatorView() {
+function showAdminAuthView() {
+      state.user = null;
+      authView.classList.add("is-hidden");
+      adminAuthView.classList.remove("is-hidden");
+      translatorView.classList.add("is-hidden");
       adminView.classList.add("is-hidden");
-      translatorView.classList.remove("is-hidden");
+      adminAuthMessage.textContent = "";
+      if (!isAdminEntryHash()) history.replaceState(null, "", "#/admin");
+      adminEmailInput?.focus();
+}
+
+function showUserAuthView() {
+      adminAuthView.classList.add("is-hidden");
+      authView.classList.remove("is-hidden");
+      translatorView.classList.add("is-hidden");
+      adminView.classList.add("is-hidden");
+      authMessage.textContent = "";
+      if (location.hash) history.replaceState(null, "", location.pathname);
+      accessIdInput.focus();
 }
 
 function setLoggedOut() {
       state.user = null;
       closeDrawer();
       authView.classList.remove("is-hidden");
+      adminAuthView.classList.add("is-hidden");
       translatorView.classList.add("is-hidden");
       adminView.classList.add("is-hidden");
       authMessage.textContent = "";
+      adminAuthMessage.textContent = "";
+      adminEmailInput.value = "";
+      adminPasswordInput.value = "";
+      if (location.hash) history.replaceState(null, "", location.pathname);
       accessIdInput.focus();
 }
 
 function setStatus(text) { connectionState.textContent = text; }
 
-/* ───────── 管理画面 ───────── */
+function setMicHint(text) {
+      if (micHint) micHint.textContent = text;
+      if (micLabel) micLabel.textContent = text;
+}
 
-function renderUserList(users) {
-      adminUserList.innerHTML = "";
-      if (!users || users.length === 0) {
-              adminUserList.innerHTML = '<p class="admin-loading">ユーザーが登録されていません。</p>';
+function updateHistoryBanner() {
+      if (!historyBanner) return;
+      historyBanner.classList.toggle("is-hidden", !state.viewingHistory);
+}
+
+function updateLiveUi() {
+      updateHistoryBanner();
+      if (state.viewingHistory) {
+              setMicHint("タップして新しい翻訳を開始");
               return;
       }
-      for (const u of users) {
+      if (state.pc) setMicHint("タップして翻訳を停止");
+      else setMicHint("マイクボタンをタップして話してください");
+}
+
+/* ───────── 管理画面 ───────── */
+
+function generateAccessId() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const part = (len) => Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+      return `team_${part(4)}-${part(4)}`;
+}
+
+async function copyAccessId(id, rowEl) {
+      try {
+              await navigator.clipboard.writeText(id);
+              showToast("IDをコピーしました");
+              if (rowEl) {
+                      rowEl.classList.add("is-copied");
+                      const copyBtn = rowEl.querySelector(".admin-copy-btn");
+                      const meta = rowEl.querySelector(".admin-user-meta");
+                      const prevBtn = copyBtn?.textContent;
+                      const prevMeta = meta?.textContent;
+                      if (copyBtn) copyBtn.textContent = "済";
+                      if (meta) meta.textContent = "コピーしました";
+                      setTimeout(() => {
+                                rowEl.classList.remove("is-copied");
+                                if (copyBtn && prevBtn) copyBtn.textContent = prevBtn;
+                                if (meta && prevMeta) meta.textContent = prevMeta;
+                      }, 1600);
+              }
+      } catch {
+              showToast("コピーに失敗しました");
+      }
+}
+
+function updateAdminStats(count, visible) {
+      const label = count === undefined ? "—" : `${count}件`;
+      if (adminUserCount) adminUserCount.textContent = label;
+      if (adminStatUsers) adminStatUsers.textContent = count === undefined ? "—" : String(count);
+      if (adminStatVisible) {
+              if (visible === undefined) adminStatVisible.textContent = "—";
+              else adminStatVisible.textContent = visible === count ? `${visible}件` : `${visible} / ${count}件`;
+      }
+}
+
+function renderUserList(users) {
+      state.adminUsers = sortUsers(users);
+      const query = (adminSearch?.value || "").trim().toLowerCase();
+      const filtered = query
+              ? state.adminUsers.filter((u) => u.id.toLowerCase().includes(query))
+              : state.adminUsers;
+      const count = state.adminUsers.length;
+      updateAdminStats(count, filtered.length);
+
+      if (adminSearchWrap) adminSearchWrap.hidden = count === 0;
+      if (adminSearchClear) adminSearchClear.hidden = !query;
+      if (adminListHead) adminListHead.hidden = filtered.length === 0;
+
+      adminUserList.innerHTML = "";
+
+      if (count === 0) {
+              adminUserList.innerHTML = `
+                    <div class="admin-empty">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                      <p class="admin-empty-title">ユーザーがいません</p>
+                      <p class="admin-empty-desc">アクセスIDを追加して、翻訳アプリへのログインを許可しましょう。</p>
+                      <button class="admin-empty-action" type="button" id="emptyQuickAdd">IDを自動生成して追加</button>
+                    </div>`;
+              adminUserList.querySelector("#emptyQuickAdd")?.addEventListener("click", handleQuickAdd);
+              return;
+      }
+
+      if (filtered.length === 0) {
+              adminUserList.innerHTML = `
+                    <div class="admin-empty">
+                      <p class="admin-empty-title">一致するユーザーがありません</p>
+                      <p class="admin-empty-desc">検索条件を変更してください。</p>
+                    </div>`;
+              return;
+      }
+
+      for (const u of filtered) {
               const row = document.createElement("div");
               row.className = "admin-user-row";
 
-        const idEl = document.createElement("span");
+              const avatar = document.createElement("span");
+              avatar.className = "admin-user-avatar";
+              avatar.textContent = u.id.slice(0, 1).toUpperCase();
+              avatar.setAttribute("aria-hidden", "true");
+
+              const info = document.createElement("div");
+              info.className = "admin-user-info";
+
+              const idEl = document.createElement("span");
               idEl.className = "admin-user-id";
               idEl.textContent = u.id;
 
-        // ロール切り替えセレクト
-        const roleSelect = document.createElement("select");
-              roleSelect.className = `admin-role-select role-${u.role}`;
-              roleSelect.innerHTML = `
-                    <option value="user" ${u.role === "user" ? "selected" : ""}>ユーザー</option>
-                          <option value="admin" ${u.role === "admin" ? "selected" : ""}>管理者</option>
-                              `;
-              roleSelect.addEventListener("change", async () => {
-                        const newRole = roleSelect.value;
-                        roleSelect.disabled = true;
-                        try {
-                                    const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, {
-                                                  method: "PATCH",
-                                                  body: JSON.stringify({ role: newRole })
-                                    });
-                                    showToast("ロールを変更しました");
-                                    renderUserList(updated);
-                        } catch (e) {
-                                    showToast(e.message);
-                                    roleSelect.value = u.role;
-                                    roleSelect.disabled = false;
-                        }
-              });
+              const meta = document.createElement("span");
+              meta.className = "admin-user-meta";
+              meta.textContent = u.seeded ? "環境設定 · 固定ID" : "追加済み";
 
-        // 削除ボタン
-        const delBtn = document.createElement("button");
-              delBtn.className = "admin-del-btn";
+              info.append(idEl, meta);
+
+              const copyBtn = document.createElement("button");
+              copyBtn.type = "button";
+              copyBtn.className = "admin-copy-btn";
+              copyBtn.textContent = "コピー";
+              copyBtn.setAttribute("aria-label", `${u.id} をコピー`);
+              copyBtn.addEventListener("click", () => copyAccessId(u.id, row));
+
+              const delBtn = document.createElement("button");
               delBtn.type = "button";
-              delBtn.setAttribute("aria-label", "削除");
+              delBtn.className = "admin-del-btn";
+              delBtn.setAttribute("aria-label", `${u.id} を削除`);
+              if (u.seeded) {
+                      delBtn.disabled = true;
+                      delBtn.title = "環境設定で定義されたIDは削除できません";
+              }
               delBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>`;
-              delBtn.addEventListener("click", () => {
+                  </svg>`;
+
+              delBtn.addEventListener("click", (e) => {
+                        e.stopPropagation();
+                        if (u.seeded) {
+                                  showToast("環境設定で定義されたIDは削除できません");
+                                  return;
+                        }
                         showConfirmDialog(`「${u.id}」を削除しますか？`, async () => {
                                     try {
                                                   const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, {
@@ -164,51 +330,77 @@ function renderUserList(users) {
                                                   });
                                                   showToast("削除しました");
                                                   renderUserList(updated);
-                                    } catch (e) {
-                                                  showToast(e.message);
+                                    } catch (err) {
+                                                  showToast(err.message);
                                     }
                         });
               });
 
-        row.append(idEl, roleSelect, delBtn);
+              row.append(avatar, info, copyBtn, delBtn);
               adminUserList.appendChild(row);
       }
 }
 
-async function loadAdminUsers() {
+async function loadAdminUsers(options = {}) {
+      const { preserveSearch = false } = options;
       if (!adminUserList) return;
-      adminUserList.innerHTML = '<p class="admin-loading">読み込み中...</p>';
+      adminUserList.innerHTML = '<p class="admin-loading"><span class="admin-spinner"></span>読み込み中...</p>';
+      updateAdminStats(undefined);
+      if (!preserveSearch && adminSearch) adminSearch.value = "";
+      if (adminSearchClear) adminSearchClear.hidden = !(adminSearch?.value || "").trim();
+      if (adminListHead) adminListHead.hidden = true;
       try {
               const { users } = await api("/api/admin/users");
               renderUserList(users);
       } catch (e) {
-              adminUserList.innerHTML = `<p class="admin-loading">読み込みエラー: ${e.message}</p>`;
+              updateAdminStats(undefined);
+              adminUserList.innerHTML = `<div class="admin-empty admin-empty-error"><p class="admin-empty-title">読み込みに失敗しました</p><p class="admin-empty-desc">${e.message}</p><button class="admin-empty-action" type="button" id="adminRetryLoad">再読み込み</button></div>`;
+              adminUserList.querySelector("#adminRetryLoad")?.addEventListener("click", loadAdminUsers);
       }
 }
 
 async function handleAddUser() {
       const id = newUserId.value.trim();
-      const role = newUserRole.value;
       if (!id) {
-              addUserMessage.textContent = "IDを入力してください";
+              setAddUserMessage("IDを入力してください");
               return;
       }
-      addUserMessage.textContent = "";
+      setAddUserMessage("");
       addUserBtn.disabled = true;
+      if (quickAddBtn) quickAddBtn.disabled = true;
       try {
               const { users } = await api("/api/admin/users", {
                         method: "POST",
-                        body: JSON.stringify({ id, role })
+                        body: JSON.stringify({ id })
               });
               newUserId.value = "";
-              newUserRole.value = "user";
+              setAddUserMessage(`「${id}」を追加しました`, "success");
               showToast(`「${id}」を追加しました`);
               renderUserList(users);
+              await copyAccessId(id);
       } catch (e) {
-              addUserMessage.textContent = e.message;
+              setAddUserMessage(e.message);
       } finally {
               addUserBtn.disabled = false;
+              if (quickAddBtn) quickAddBtn.disabled = false;
       }
+}
+
+function handleGenerateId() {
+      newUserId.value = generateAccessId();
+      newUserId.focus();
+      setAddUserMessage("");
+}
+
+async function handleQuickAdd() {
+      newUserId.value = generateAccessId();
+      await handleAddUser();
+}
+
+function setAddUserMessage(text, type = "error") {
+      if (!addUserMessage) return;
+      addUserMessage.textContent = text;
+      addUserMessage.classList.toggle("is-success", type === "success");
 }
 
 /* ───────── 確認ダイアログ ───────── */
@@ -219,6 +411,7 @@ function showConfirmDialog(message, onConfirm) {
       dialogMessage.textContent = message;
       _confirmCallback = onConfirm;
       dialogOverlay.classList.remove("is-hidden");
+      dialogConfirm?.focus();
 }
 
 function closeConfirmDialog() {
@@ -273,6 +466,7 @@ function resetConversation() {
       state.sessionId = null; state.sessionStartedAt = null;
       state.viewingHistory = false;
       renderConversation();
+      updateLiveUi();
 }
 
 /* ───────── レンダリング ───────── */
@@ -325,8 +519,16 @@ function renderConversation() {
       if (state.turns.length === 0) {
               const empty = document.createElement("div");
               empty.className = "chat-empty";
-              empty.innerHTML = '<div class="chat-empty-icon">🎙️</div>マイクをタップして<br>会話を始めましょう。<br>話した言語を自動で判別して翻訳します。';
-              chatList.appendChild(empty); return;
+              empty.innerHTML = `
+                    <div class="chat-empty-icon">🎙️</div>
+                    <p class="chat-empty-title">リアルタイム翻訳を始めましょう</p>
+                    <ol class="chat-empty-steps">
+                      <li>下の<strong>マイクボタン</strong>をタップ</li>
+                      <li>日本語または英語で話す</li>
+                      <li>翻訳が音声とテキストで表示されます</li>
+                    </ol>`;
+              chatList.appendChild(empty);
+              return;
       }
       for (const turn of state.turns) {
               if (turn.original) chatList.appendChild(makeBubble({ type: "original", lang: "聞き取り", text: turn.original }));
@@ -417,6 +619,7 @@ function loadSession(id) {
       state.activeTurn = null; state.sessionId = session.id;
       state.sessionStartedAt = session.startedAt; state.viewingHistory = true;
       renderConversation(); renderSessionList(); closeDrawer();
+      updateLiveUi();
 }
 
 /* ───────── ドロワー ───────── */
@@ -462,6 +665,7 @@ async function startRealtime() {
               state.turns = []; state.activeTurn = null;
               state.sessionId = null; state.sessionStartedAt = null; state.viewingHistory = false;
               renderConversation();
+              updateLiveUi();
       }
       setStatus("マイク権限を確認中"); micButton.disabled = true;
       try {
@@ -475,7 +679,7 @@ async function startRealtime() {
                         if (pc.connectionState === "connected") setStatus("翻訳中");
                         if (["failed","closed","disconnected"].includes(pc.connectionState)) { if (state.pc === pc) stopRealtime("接続終了"); }
               };
-              dc.addEventListener("open", () => { sendSessionUpdate(); setStatus("翻訳中"); });
+              dc.addEventListener("open", () => { sendSessionUpdate(); setStatus("翻訳中"); updateLiveUi(); });
               dc.addEventListener("message", (message) => {
                         try { handleRealtimeEvent(JSON.parse(message.data)); } catch { setStatus("イベント解析エラー"); }
               });
@@ -489,7 +693,8 @@ async function startRealtime() {
               await pc.setRemoteDescription({ type: "answer", sdp: await answer.text() });
               state.pc = pc; state.dc = dc; state.stream = stream;
               translatorView.classList.add("is-live");
-              micButton.setAttribute("aria-pressed", "true"); micLabel.textContent = "タップして停止";
+              micButton.setAttribute("aria-pressed", "true");
+              updateLiveUi();
       } catch (error) {
               stopRealtime();
               setStatus(error.message.includes("Permission") ? "マイク権限が必要です" : error.message);
@@ -502,42 +707,144 @@ function stopRealtime(status = "待機中") {
       if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
       state.pc = null; state.dc = null; state.stream = null; state.activeTurn = null;
       translatorView.classList.remove("is-live");
-      micButton.setAttribute("aria-pressed", "false"); micLabel.textContent = "タップして開始";
-      setStatus(status); saveCurrentSession();
+      micButton.setAttribute("aria-pressed", "false");
+      setStatus(status);
+      updateLiveUi();
+      saveCurrentSession();
+}
+
+function resumeLiveTranslation() {
+      if (state.pc) stopRealtime();
+      resetConversation();
+      startRealtime();
 }
 
 /* ───────── 起動・イベント ───────── */
 
 async function boot() {
-      try { const { user } = await api("/api/me"); setAuthenticated(user); }
-      catch { setLoggedOut(); }
+      try {
+              const { user } = await api("/api/me");
+              if (user.role === "admin") setAdminAuthenticated(user);
+              else setAuthenticated(user);
+      } catch {
+              if (isAdminEntryHash()) showAdminAuthView();
+              else setLoggedOut();
+      }
+}
+
+async function handlePasteAccessId() {
+      if (!navigator.clipboard?.readText) {
+              showToast("このブラウザでは貼り付けできません");
+              return;
+      }
+      try {
+              const text = (await navigator.clipboard.readText()).trim();
+              if (!text) {
+                      showToast("クリップボードが空です");
+                      return;
+              }
+              accessIdInput.value = text;
+              authMessage.textContent = "";
+              accessIdInput.focus();
+      } catch {
+              showToast("クリップボードへのアクセスが拒否されました");
+      }
 }
 
 async function handleLogin() {
       authMessage.textContent = "";
+      loginSubmit.disabled = true;
+      loginSubmit.textContent = "ログイン中...";
       try {
               const { user } = await api("/api/login", { method: "POST", body: JSON.stringify({ accessId: accessIdInput.value.trim() }) });
-              accessIdInput.value = ""; setAuthenticated(user);
-      } catch (error) { authMessage.textContent = error.message; }
+              accessIdInput.value = "";
+              setAuthenticated(user);
+      } catch (error) {
+              authMessage.textContent = error.message;
+      } finally {
+              loginSubmit.disabled = false;
+              loginSubmit.textContent = "ログイン";
+      }
+}
+
+async function handleAdminLogin() {
+      adminAuthMessage.textContent = "";
+      adminLoginSubmit.disabled = true;
+      adminLoginSubmit.textContent = "ログイン中...";
+      try {
+              const { user } = await api("/api/admin/login", {
+                        method: "POST",
+                        body: JSON.stringify({
+                                  email: adminEmailInput.value.trim(),
+                                  password: adminPasswordInput.value
+                        })
+              });
+              adminPasswordInput.value = "";
+              setAdminAuthenticated(user);
+      } catch (error) {
+              adminAuthMessage.textContent = error.message;
+      } finally {
+              adminLoginSubmit.disabled = false;
+              adminLoginSubmit.textContent = "ログイン";
+      }
 }
 
 async function handleLogout() {
+      const wasAdmin = state.user?.role === "admin";
       stopRealtime();
       await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
-      setLoggedOut();
+      state.user = null;
+      closeDrawer();
+      translatorView.classList.add("is-hidden");
+      adminView.classList.add("is-hidden");
+      authMessage.textContent = "";
+      adminAuthMessage.textContent = "";
+      adminEmailInput.value = "";
+      adminPasswordInput.value = "";
+      accessIdInput.value = "";
+      if (wasAdmin) showAdminAuthView();
+      else setLoggedOut();
 }
 
+window.addEventListener("hashchange", () => {
+      if (state.user) return;
+      if (isAdminEntryHash()) showAdminAuthView();
+      else if (!adminAuthView.classList.contains("is-hidden")) showUserAuthView();
+});
+
 loginForm.addEventListener("submit", (e) => { e.preventDefault(); handleLogin(); });
-loginSubmit.addEventListener("click", handleLogin);
+if (pasteAccessIdBtn) pasteAccessIdBtn.addEventListener("click", handlePasteAccessId);
+if (adminLoginForm) adminLoginForm.addEventListener("submit", (e) => { e.preventDefault(); handleAdminLogin(); });
+if (adminLoginSubmit) adminLoginSubmit.addEventListener("click", handleAdminLogin);
+if (showAdminLogin) showAdminLogin.addEventListener("click", showAdminAuthView);
+if (showUserLogin) showUserLogin.addEventListener("click", showUserAuthView);
 logoutButton.addEventListener("click", handleLogout);
 if (adminLogoutButton) adminLogoutButton.addEventListener("click", handleLogout);
 
 micButton.addEventListener("click", () => { if (state.pc) stopRealtime(); else startRealtime(); });
 
-if (adminButton) adminButton.addEventListener("click", showAdminView);
-if (adminBackButton) adminBackButton.addEventListener("click", showTranslatorView);
+if (adminRefreshBtn) adminRefreshBtn.addEventListener("click", () => loadAdminUsers({ preserveSearch: true }));
 if (addUserBtn) addUserBtn.addEventListener("click", handleAddUser);
+if (generateIdBtn) generateIdBtn.addEventListener("click", handleGenerateId);
+if (quickAddBtn) quickAddBtn.addEventListener("click", handleQuickAdd);
+if (adminSearch) adminSearch.addEventListener("input", () => renderUserList(state.adminUsers));
+if (adminSearchClear) adminSearchClear.addEventListener("click", () => {
+      adminSearch.value = "";
+      adminSearchClear.hidden = true;
+      renderUserList(state.adminUsers);
+      adminSearch.focus();
+});
+if (adminPasswordToggle) {
+      adminPasswordToggle.addEventListener("click", () => {
+              const isPassword = adminPasswordInput.type === "password";
+              adminPasswordInput.type = isPassword ? "text" : "password";
+              adminPasswordToggle.classList.toggle("is-visible", isPassword);
+              adminPasswordToggle.setAttribute("aria-label", isPassword ? "パスワードを隠す" : "パスワードを表示");
+      });
+}
 if (newUserId) newUserId.addEventListener("keydown", (e) => { if (e.key === "Enter") handleAddUser(); });
+
+if (resumeLiveBtn) resumeLiveBtn.addEventListener("click", resumeLiveTranslation);
 
 historyButton.addEventListener("click", openDrawer);
 drawerClose.addEventListener("click", closeDrawer);
@@ -554,6 +861,15 @@ if (dialogConfirm) dialogConfirm.addEventListener("click", () => {
       if (cb) cb();
 });
 if (dialogOverlay) dialogOverlay.addEventListener("click", (e) => { if (e.target === dialogOverlay) closeConfirmDialog(); });
+
+window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (!dialogOverlay?.classList.contains("is-hidden")) {
+              closeConfirmDialog();
+              return;
+      }
+      if (drawer?.classList.contains("is-open")) closeDrawer();
+});
 
 window.addEventListener("beforeunload", saveCurrentSession);
 

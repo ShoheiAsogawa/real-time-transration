@@ -9,7 +9,8 @@ preview_id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 
 
 [vars]
-# カンマ区切りでログインを許可するIDを入力
-ALLOWED_LOGIN_IDS = "admin1,user1,user2"
-# 「ID:role」形式でロールを指定。未記載のIDは自動的に user 扱い
-USER_ROLES = "admin1:admin,user1:user,user2:user"
+# カンマ区切りでログインを許可するアクセスID（一般ユーザー用）
+ALLOWED_LOGIN_IDS = "user1,user2"
+# 管理画面ログイン（本番では ADMIN_PASSWORD_HASH を secret で上書きすること）
+ADMIN_EMAIL = "admin@lingualive.local"
+ADMIN_PASSWORD_HASH = "100000:5249adba9d8262a7ece249fc646bcd88:03f60ebcef08a074621d70a9548d13fa41668b9b104222c35f221d0b742d91f0"

@@ -35,6 +35,13 @@ const allowedIdHashes = new Set(
     .map((hash) => hash.trim().toLowerCase())
     .filter(Boolean)
 );
+const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || "admin@lingualive.local");
+const adminPasswordHash = String(
+  process.env.ADMIN_PASSWORD_HASH ||
+    "100000:5249adba9d8262a7ece249fc646bcd88:03f60ebcef08a074621d70a9548d13fa41668b9b104222c35f221d0b742d91f0"
+).trim();
+const users = [...allowedPlainIds].map((id) => ({ id, role: "user", seeded: true }));
+
 function loadDotEnv(filePath) {
   if (!fs.existsSync(filePath)) return;
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
@@ -52,6 +59,54 @@ function loadDotEnv(filePath) {
 
 function normalizeId(value) {
   return String(value || "").trim();
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function hashPassword(password, salt, iterations = 100000) {
+  return crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
+}
+
+function parsePasswordHash(storedHash) {
+  const value = String(storedHash || "").trim();
+  if (!value) return null;
+  const delimiter = value.includes(":") ? ":" : "$";
+  const parts = value.split(delimiter);
+  if (parts.length !== 3) return null;
+  const [iterations, salt, expectedHash] = parts;
+  if (!iterations || !salt || !expectedHash) return null;
+  return { iterations: Number(iterations), salt, expectedHash };
+}
+
+function verifyPassword(password, storedHash) {
+  const parsed = parsePasswordHash(storedHash);
+  if (!parsed) return false;
+  const { iterations, salt, expectedHash } = parsed;
+  const actualHash = crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
+  const actualBuffer = Buffer.from(actualHash);
+  const expectedBuffer = Buffer.from(expectedHash);
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function verifyAdminCredentials(email, password) {
+  if (!adminEmail || !adminPasswordHash) return false;
+  const normalizedEmail = normalizeEmail(email);
+  const emailBuffer = Buffer.from(normalizedEmail);
+  const configuredBuffer = Buffer.from(adminEmail);
+  if (emailBuffer.length !== configuredBuffer.length || !crypto.timingSafeEqual(emailBuffer, configuredBuffer)) {
+    return false;
+  }
+  return verifyPassword(String(password || ""), adminPasswordHash);
+}
+
+function maskEmail(email) {
+  const normalized = normalizeEmail(email);
+  const [local, domain] = normalized.split("@");
+  if (!local || !domain) return "admin";
+  const maskedLocal = local.length <= 2 ? `${local[0]}*` : `${local.slice(0, 2)}***`;
+  return `${maskedLocal}@${domain}`;
 }
 
 function hashAccessId(accessId) {
@@ -72,7 +127,17 @@ function timingSafeIncludes(set, value) {
 function isAllowedAccessId(accessId) {
   const normalized = normalizeId(accessId);
   if (!normalized || normalized.length > 128) return false;
-  if (allowedPlainIds.size && timingSafeIncludes(allowedPlainIds, normalized)) return true;
+  for (const id of allowedPlainIds) {
+    if (id.length === normalized.length && crypto.timingSafeEqual(Buffer.from(id), Buffer.from(normalized))) {
+      return true;
+    }
+  }
+  if (users.some((user) => {
+    if (user.id.length !== normalized.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(user.id), Buffer.from(normalized));
+  })) {
+    return true;
+  }
   if (allowedIdHashes.size && timingSafeIncludes(allowedIdHashes, hashAccessId(normalized))) return true;
   return false;
 }
@@ -120,6 +185,23 @@ function setSession(res, accessId) {
   sessions.set(sessionId, {
     accessIdHash: hashAccessId(accessId),
     label: maskAccessId(accessId),
+    role: "user",
+    expiresAt
+  });
+  res.setHeader(
+    "Set-Cookie",
+    `ll_session=${encodeURIComponent(createCookie(sessionId))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`
+  );
+  return sessions.get(sessionId);
+}
+
+function setAdminSession(res, email) {
+  const sessionId = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  sessions.set(sessionId, {
+    adminEmailHash: hashAccessId(normalizeEmail(email)),
+    label: maskEmail(email),
+    role: "admin",
     expiresAt
   });
   res.setHeader(
@@ -133,9 +215,21 @@ function clearSession(res) {
   res.setHeader("Set-Cookie", "ll_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
 }
 
+function sortUsers(list) {
+  return [...list].sort((a, b) => a.id.localeCompare(b.id, "ja"));
+}
+
+function idsEqual(a, b) {
+  const left = normalizeId(a);
+  const right = normalizeId(b);
+  if (!left || !right || left.length !== right.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+}
+
 function maskAccessId(accessId) {
   const id = normalizeId(accessId);
-  if (id.length <= 6) return "issued-id";
+  if (id.length <= 2) return "•••";
+  if (id.length <= 6) return `${id[0]}${"•".repeat(Math.max(1, id.length - 2))}${id[id.length - 1]}`;
   return `${id.slice(0, 4)}...${id.slice(-2)}`;
 }
 
@@ -143,15 +237,21 @@ function clientIp(req) {
   return String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
 }
 
-function checkRateLimit(bucket, key, max, windowMs) {
+function isRateLimited(bucket, key, max, windowMs) {
+  const now = Date.now();
+  const current = bucket.get(key);
+  if (!current || current.resetAt <= now) return false;
+  return current.count >= max;
+}
+
+function recordFailedAttempt(bucket, key, windowMs) {
   const now = Date.now();
   const current = bucket.get(key);
   if (!current || current.resetAt <= now) {
     bucket.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
+    return;
   }
   current.count += 1;
-  return current.count <= max;
 }
 
 function json(res, status, payload) {
@@ -304,7 +404,32 @@ async function routeApi(req, res) {
     }
     json(res, 200, {
       user: {
-        id: session.label
+        id: session.label,
+        role: session.role || "user"
+      }
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/admin/login" && req.method === "POST") {
+    const ip = clientIp(req);
+    if (isRateLimited(loginAttempts, ip, authMaxAttempts, authWindowMs)) {
+      json(res, 429, { error: "ログイン試行が多すぎます。時間を置いて再試行してください。" });
+      return;
+    }
+
+    const { email, password } = await readJson(req);
+    if (!verifyAdminCredentials(email, password)) {
+      recordFailedAttempt(loginAttempts, ip, authWindowMs);
+      json(res, 401, { error: "メールアドレスまたはパスワードが正しくありません。" });
+      return;
+    }
+
+    const session = setAdminSession(res, email);
+    json(res, 200, {
+      user: {
+        id: session.label,
+        role: session.role
       }
     });
     return;
@@ -312,13 +437,14 @@ async function routeApi(req, res) {
 
   if (url.pathname === "/api/login" && req.method === "POST") {
     const ip = clientIp(req);
-    if (!checkRateLimit(loginAttempts, ip, authMaxAttempts, authWindowMs)) {
+    if (isRateLimited(loginAttempts, ip, authMaxAttempts, authWindowMs)) {
       json(res, 429, { error: "ログイン試行が多すぎます。時間を置いて再試行してください。" });
       return;
     }
 
     const { accessId } = await readJson(req);
     if (!isAllowedAccessId(accessId)) {
+      recordFailedAttempt(loginAttempts, ip, authWindowMs);
       json(res, 401, { error: "このアクセスIDではログインできません。" });
       return;
     }
@@ -326,9 +452,79 @@ async function routeApi(req, res) {
     const session = setSession(res, accessId);
     json(res, 200, {
       user: {
-        id: session.label
+        id: session.label,
+        role: session.role
       }
     });
+    return;
+  }
+
+  if (url.pathname === "/api/admin/users" && req.method === "GET") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+    json(res, 200, { users: sortUsers(users) });
+    return;
+  }
+
+  if (url.pathname === "/api/admin/users" && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    const { id } = await readJson(req);
+    const normalizedId = normalizeId(id);
+    if (!normalizedId || normalizedId.length > 128) {
+      json(res, 400, { error: "IDが無効です" });
+      return;
+    }
+    if (users.some((user) => idsEqual(user.id, normalizedId))) {
+      json(res, 409, { error: "そのIDはすでに存在します" });
+      return;
+    }
+    users.push({ id: normalizedId, role: "user", seeded: false });
+    allowedPlainIds.add(normalizedId);
+    json(res, 200, { ok: true, users: sortUsers(users) });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/admin/users/") && req.method === "DELETE") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    const targetId = decodeURIComponent(url.pathname.replace("/api/admin/users/", ""));
+
+    const index = users.findIndex((user) => idsEqual(user.id, targetId));
+    if (index < 0) {
+      json(res, 404, { error: "ユーザーが見つかりません" });
+      return;
+    }
+    if (users[index].seeded) {
+      json(res, 403, { error: "環境設定で定義されたIDは削除できません。" });
+      return;
+    }
+    users.splice(index, 1);
+    allowedPlainIds.delete(targetId);
+    json(res, 200, { ok: true, users: sortUsers(users) });
     return;
   }
 
