@@ -114,29 +114,35 @@
         </header>header>
     
         <div class="admin-content">
+        
+              <!-- ユーザー追加フォーム -->
               <section class="admin-section">
-                      <h3 class="admin-section-title">ユーザー一覧</h3>h3>
-                      <p class="admin-section-desc">環境変数 <code>ALLOWED_LOGIN_IDS</code> と <code>USER_ROLES</code> で管理されているユーザーです。</p>p>
-                      <div class="admin-user-list" id="adminUserList">
-                                <p class="admin-loading">読み込み中...</p>p>
+                      <h3 class="admin-section-title">ユーザーを追加</h3>h3>
+                      <div class="admin-add-form">
+                                <div class="admin-add-row">
+                                            <input
+                                                            class="admin-input"
+                                                            id="newUserId"
+                                                            type="text"
+                                                            placeholder="アクセスID"
+                                                            autocapitalize="none"
+                                                            spellcheck="false"
+                                                          />
+                                            <select class="admin-select" id="newUserRole">
+                                                          <option value="user">ユーザー</option>option>
+                                                          <option value="admin">管理者</option>option>
+                                            </select>select>
+                                            <button class="admin-add-btn" id="addUserBtn" type="button">追加</button>button>
+                                </div>div>
+                                <p class="admin-add-message" id="addUserMessage" role="status"></p>p>
                       </div>div>
               </section>section>
         
+              <!-- ユーザー一覧 -->
               <section class="admin-section">
-                      <h3 class="admin-section-title">ロール設定方法</h3>h3>
-                      <div class="admin-howto">
-                                <p>Cloudflare Pages の環境変数に以下を設定してください：</p>
-                                <div class="admin-code-block">
-                                            <p><strong>ALLOWED_LOGIN_IDS</strong></p>
-                                            <code>alice,bob,carol</code>
-                                            <p class="admin-code-desc">カンマ区切りでアクセスIDを列挙</p>
-                                </div>div>
-                                <div class="admin-code-block">
-                                            <p><strong>USER_ROLES</strong></p>
-                                            <code>alice:admin,bob:user,carol:user</code>
-                                            <p class="admin-code-desc">「ID:ロール」形式でカンマ区切り。未設定のIDは自動的に <strong>user</strong> になります。</p>
-                                </div>div>
-                                <p class="admin-note">※ 設定変更後は再デプロイが必要です。</p>
+                      <h3 class="admin-section-title">ユーザー一覧</h3>h3>
+                      <div class="admin-user-list" id="adminUserList">
+                                <p class="admin-loading">読み込み中...</p>p>
                       </div>div>
               </section>section>
         
@@ -169,11 +175,22 @@
   
     <!-- トースト -->
     <div class="toast" id="toast" role="status" aria-live="polite"></div>div>
+  
+    <!-- 削除確認ダイアログ -->
+    <div class="dialog-overlay is-hidden" id="dialogOverlay">
+        <div class="dialog" id="confirmDialog">
+              <p class="dialog-message" id="dialogMessage">このユーザーを削除しますか？</p>p>
+              <div class="dialog-actions">
+                      <button class="dialog-btn cancel" id="dialogCancel" type="button">キャンセル</button>button>
+                      <button class="dialog-btn danger" id="dialogConfirm" type="button">削除</button>button>
+              </div>div>
+        </div>div>
+    </div>div>
   </div>div>
 
 <script src="script.js" type="module"></script>
 </body>
-</html>html></h3></strong></strong></p></p></code></code></span></span>
+</html>html></h3></span></span>
                                           </defs>
 </body></title>
   </head>
