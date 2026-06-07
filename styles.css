@@ -903,3 +903,199 @@ h1 {
     margin: 0;
     border-top: none;
 }
+
+
+/* ── Admin Add Form ── */
+
+.admin-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.admin-add-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.admin-input {
+    flex: 1;
+    min-width: 8rem;
+    height: 2.6rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--separator);
+    border-radius: 0.6rem;
+    background: var(--fill);
+    font-size: 0.9375rem;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-input:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
+}
+
+.admin-select {
+    height: 2.6rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--separator);
+    border-radius: 0.6rem;
+    background: var(--fill);
+    font-size: 0.875rem;
+    color: var(--ink);
+    outline: none;
+    cursor: pointer;
+}
+
+.admin-add-btn {
+    height: 2.6rem;
+    padding: 0 1.1rem;
+    border: none;
+    border-radius: 0.6rem;
+    background: var(--blue);
+    color: #fff;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.12s;
+    white-space: nowrap;
+}
+
+.admin-add-btn:active { transform: scale(0.96); opacity: 0.85; }
+.admin-add-btn:disabled { opacity: 0.5; }
+
+.admin-add-message {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #ff3b30;
+    min-height: 1rem;
+    padding: 0 0.1rem;
+}
+
+/* ── Admin User Row (updated with role select + delete) ── */
+
+.admin-user-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.65rem 0.9rem;
+    background: var(--fill);
+    border-radius: 0.65rem;
+}
+
+.admin-user-id {
+    flex: 1;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-role-select {
+    height: 2.1rem;
+    padding: 0 0.5rem;
+    border: 1.5px solid var(--separator);
+    border-radius: 0.5rem;
+    background: var(--bg-elevated);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.admin-role-select.role-admin {
+    border-color: var(--blue);
+    color: var(--blue);
+}
+
+.admin-role-select.role-user {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.admin-del-btn {
+    width: 2.1rem;
+    height: 2.1rem;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 0.5rem;
+    background: rgba(255, 59, 48, 0.1);
+    color: #ff3b30;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.12s;
+}
+
+.admin-del-btn:active { transform: scale(0.9); background: rgba(255,59,48,0.2); }
+
+/* ── Confirm Dialog ── */
+
+.dialog-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+    padding: 1.5rem;
+}
+
+.dialog-overlay.is-hidden {
+    display: none;
+}
+
+.dialog {
+    background: var(--bg-elevated);
+    border-radius: 1rem;
+    padding: 1.5rem 1.25rem 1.25rem;
+    width: 100%;
+    max-width: 20rem;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.22);
+}
+
+.dialog-message {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--ink);
+    text-align: center;
+    margin-bottom: 1.25rem;
+    line-height: 1.45;
+}
+
+.dialog-actions {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.dialog-btn {
+    flex: 1;
+    height: 2.75rem;
+    border: none;
+    border-radius: 0.7rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.12s;
+}
+
+.dialog-btn:active { transform: scale(0.97); opacity: 0.85; }
+
+.dialog-btn.cancel {
+    background: var(--fill);
+    color: var(--ink);
+}
+
+.dialog-btn.danger {
+    background: #ff3b30;
+    color: #fff;
+}
