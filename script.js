@@ -1,560 +1,581 @@
-const frameCount = 240;
-const defaultFrameBase = "public/frames";
-const canvas = document.querySelector("#sequence");
-const blendCanvas = document.querySelector("#sequence-blend");
-const context = canvas.getContext("2d");
-const blendContext = blendCanvas.getContext("2d");
-const scrollZones = [...document.querySelectorAll("[data-scroll-zone]")];
-const chapterTargets = [...document.querySelectorAll("[data-chapter]")];
-const chapterCurrent = document.querySelector(".chapter-current");
-const chapterTotal = document.querySelector(".chapter-total");
-const chapterLabel = document.querySelector(".chapter-label");
-const images = new Map();
-const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const HISTORY_KEY = "lingualive_history_v2";
 
-const PX_PER_FRAME = 18;
-const BRIDGE_VIEWPORT_RATIO = 0.86;
-const SCENE_TEXT_REVEAL_AT = 0.08;
-const MOBILE_MQ = window.matchMedia("(max-width: 640px)");
-const MOBILE_PX_PER_FRAME_FACTOR = 1.55;
-const MOBILE_FRAME_LERP = 0.1;
-const DESKTOP_FRAME_LERP = 0.16;
-const MOBILE_BRIDGE_VIEWPORT_RATIO = 1.05;
-const MOBILE_HOLD_RATIO_FACTOR = 1.35;
+const state = {
+  pc: null,
+  dc: null,
+  stream: null,
+  user: null,
+  turns: [],
+  activeTurn: null,
+  sessionId: null,
+  sessionStartedAt: null,
+  viewingHistory: false
+};
 
-function isMobileViewport() {
-  return MOBILE_MQ.matches;
+const authView = document.querySelector("#authView");
+const translatorView = document.querySelector("#translatorView");
+const loginForm = document.querySelector("#loginForm");
+const accessIdInput = document.querySelector("#accessId");
+const authMessage = document.querySelector("#authMessage");
+const loginSubmit = document.querySelector("#loginSubmit");
+const logoutButton = document.querySelector("#logoutButton");
+const micButton = document.querySelector("#micButton");
+const micLabel = document.querySelector("#micLabel");
+const connectionState = document.querySelector("#connectionState");
+const chatList = document.querySelector("#chatList");
+const remoteAudio = document.querySelector("#remoteAudio");
+
+const historyButton = document.querySelector("#historyButton");
+const drawer = document.querySelector("#drawer");
+const drawerOverlay = document.querySelector("#drawerOverlay");
+const drawerClose = document.querySelector("#drawerClose");
+const newConversationButton = document.querySelector("#newConversationButton");
+const sessionList = document.querySelector("#sessionList");
+const toast = document.querySelector("#toast");
+
+/* ───────── 翻訳指示 ───────── */
+
+function buildInstructions() {
+  return [
+    "You are LinguaLive, a realtime Japanese-English interpreter.",
+    "Automatically detect whether the speaker is using Japanese or English.",
+    "If the speaker uses Japanese, translate into natural English.",
+    "If the speaker uses English, translate into natural Japanese.",
+    "When the speaker switches language, adapt immediately without asking or commenting.",
+    "Return only the translation, with no commentary, labels, or explanations.",
+    "Keep the translation natural, concise, and faithful. Preserve names, numbers, and technical terms."
+  ].join(" ");
 }
 
-const BRIDGE_HOLD_END = 0;
-const BRIDGE_FADE_TO_BLACK_END = 0.28;
-const BRIDGE_TITLE_END = 0.58;
-const BRIDGE_FADE_IN_END = 1;
-
-let zones = [];
-let currentFrame = 0;
-let targetFrame = 0;
-let currentFrameBase = defaultFrameBase;
-let targetFrameBase = defaultFrameBase;
-let blendTarget = 0;
-let blendAmount = 0;
-let veilAmount = 0;
-let sceneOpacity = 1;
-let titleOpacity = 0;
-let activeBridge = null;
-let activeChapterIndex = -1;
-const transitionKicker = document.querySelector(".transition-kicker");
-const transitionHeading = document.querySelector(".transition-heading");
-const transitionTitles = document.querySelector(".transition-titles");
-
-if ("scrollRestoration" in history) {
-  history.scrollRestoration = "manual";
-}
-
-function framePath(index, base = defaultFrameBase) {
-  return `${base}/frame_${String(index + 1).padStart(6, "0")}.jpg`;
-}
-
-function loadFrame(index, base = defaultFrameBase) {
-  const key = `${base}:${index}`;
-  if (images.has(key)) return images.get(key);
-
-  const image = new Image();
-  image.decoding = "async";
-  image.src = framePath(index, base);
-  images.set(key, image);
-  return image;
-}
-
-function drawCover(image, ctx = context, targetCanvas = canvas) {
-  if (!image || !image.complete || !image.naturalWidth) return;
-
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.floor(window.innerWidth * dpr);
-  const height = Math.floor(window.innerHeight * dpr);
-
-  if (targetCanvas.width !== width || targetCanvas.height !== height) {
-    targetCanvas.width = width;
-    targetCanvas.height = height;
-  }
-
-  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
-  const drawWidth = image.naturalWidth * scale;
-  const drawHeight = image.naturalHeight * scale;
-  const x = (width - drawWidth) / 2;
-  const y = (height - drawHeight) / 2;
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(image, x, y, drawWidth, drawHeight);
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-function lerp(start, end, amount) {
-  return start + (end - start) * amount;
-}
-
-function numberOption(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function getScrollProgress() {
-  const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-  return maxScroll > 0 ? clamp(window.scrollY / maxScroll, 0, 1) : 0;
-}
-
-function getActiveZone() {
-  if (!zones.length) return null;
-
-  const scrollY = window.scrollY;
-  return (
-    zones.find((zone) => scrollY >= zone.top && scrollY < zone.bottom) ??
-    (scrollY < zones[0].top ? zones[0] : zones[zones.length - 1])
-  );
-}
-
-function getZoneLocal(zone) {
-  if (!zone) return 0;
-
-  return clamp((window.scrollY - zone.top) / (zone.bottom - zone.top), 0, 1);
-}
-
-function warmNearby(index, base = defaultFrameBase, count = frameCount) {
-  for (let offset = 1; offset <= 8; offset += 1) {
-    if (index + offset < count) loadFrame(index + offset, base);
-    if (index - offset >= 0) loadFrame(index - offset, base);
-  }
-}
-
-function buildZones() {
-  let offsetTop = 0;
-
-  zones = scrollZones.map((element) => {
-    const type = element.dataset.scrollZone;
-    let height = 0;
-    const zone = { element, type, top: offsetTop };
-
-    if (type === "scene") {
-      const base = element.dataset.frameBase || defaultFrameBase;
-      const start = Number(element.dataset.frameStart);
-      const end = Number(element.dataset.frameEnd);
-      const length = end - start + 1;
-      const pxPerFrame =
-        Number(element.dataset.pxPerFrame ?? PX_PER_FRAME) *
-        (isMobileViewport() ? MOBILE_PX_PER_FRAME_FACTOR : 1);
-      const panelCount = element.querySelectorAll(".panel").length || 1;
-      const contentHeight = panelCount * window.innerHeight;
-      const frameHeight = length * pxPerFrame;
-      height = Math.max(contentHeight, frameHeight);
-      zone.frameStart = start;
-      zone.frameEnd = end;
-      zone.frameLength = length;
-      zone.pxPerFrame = pxPerFrame;
-      zone.frameBase = base;
-      zone.frameCount = Number(element.dataset.frameCount ?? (end + 1));
-
-      if (panelCount === 1) {
-        const panel = element.querySelector(".panel");
-        if (panel) panel.style.minHeight = `${height}px`;
-      }
-    } else if (type === "bridge") {
-      const bridgeRatio = isMobileViewport() ? MOBILE_BRIDGE_VIEWPORT_RATIO : BRIDGE_VIEWPORT_RATIO;
-      height = Math.round(window.innerHeight * bridgeRatio);
-      zone.holdFrame = Number(element.dataset.holdFrame);
-      zone.holdBase = element.dataset.holdBase || defaultFrameBase;
-      zone.nextFrame = Number(element.dataset.nextFrame);
-      zone.nextBase = element.dataset.nextBase || defaultFrameBase;
-      zone.nextKicker = element.dataset.nextKicker || "";
-      zone.nextTitle = element.dataset.nextTitle || "";
-      zone.fadeToBlackEnd = numberOption(element.dataset.fadeToBlackEnd, BRIDGE_FADE_TO_BLACK_END);
-      zone.titleEnd = numberOption(element.dataset.titleEnd, BRIDGE_TITLE_END);
-      zone.fadeInEnd = numberOption(element.dataset.fadeInEnd, BRIDGE_FADE_IN_END);
-    } else if (type === "hold") {
-      const holdRatio = Number(element.dataset.holdRatio ?? 1.18);
-      const mobileHoldFactor = isMobileViewport() ? MOBILE_HOLD_RATIO_FACTOR : 1;
-      height = Math.round(window.innerHeight * holdRatio * mobileHoldFactor);
-      zone.frameBase = element.dataset.frameBase || defaultFrameBase;
-      zone.holdFrame = Number(element.dataset.holdFrame ?? frameCount - 1);
-      zone.loopStart = Number(element.dataset.loopStart ?? 0);
-      zone.loopEnd = Number(element.dataset.loopEnd ?? 59);
-      zone.frameCount = Number(element.dataset.frameCount ?? frameCount);
-    }
-
-    zone.bottom = offsetTop + height;
-    element.style.minHeight = `${height}px`;
-    offsetTop = zone.bottom;
-
-    return zone;
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+    ...options
   });
 
-  document.body.style.minHeight = `${offsetTop}px`;
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(payload.error || "Request failed");
+  }
+  return payload;
 }
 
-function getBridgeTransition(local, zone) {
-  const peakVeil = 1;
-  const fadeToBlackEnd = clamp(zone?.fadeToBlackEnd ?? BRIDGE_FADE_TO_BLACK_END, 0.01, 0.98);
-  const titleEnd = clamp(zone?.titleEnd ?? BRIDGE_TITLE_END, fadeToBlackEnd + 0.01, 0.99);
-  const fadeInEnd = clamp(zone?.fadeInEnd ?? BRIDGE_FADE_IN_END, titleEnd + 0.01, 1);
+/* ───────── 認証 ───────── */
 
-  if (local < BRIDGE_HOLD_END) {
-    return {
-      frame: "hold",
-      veil: 0,
-      sceneOpacity: 1,
-      title: 0
-    };
-  }
-
-  if (local < fadeToBlackEnd) {
-    const t = easeInOutCubic(
-      (local - BRIDGE_HOLD_END) / (fadeToBlackEnd - BRIDGE_HOLD_END)
-    );
-    return {
-      frame: "hold",
-      veil: lerp(0, peakVeil, t),
-      sceneOpacity: lerp(1, 0, t),
-      title: 0
-    };
-  }
-
-  if (local < titleEnd) {
-    return {
-      frame: "next",
-      veil: peakVeil,
-      sceneOpacity: 0,
-      title: 1
-    };
-  }
-
-  if (local < fadeInEnd) {
-    const t = easeInOutCubic(
-      (local - titleEnd) / (fadeInEnd - titleEnd)
-    );
-    return {
-      frame: "next",
-      veil: lerp(peakVeil, 0, t),
-      sceneOpacity: lerp(0, 1, t),
-      title: lerp(1, 0, t)
-    };
-  }
-
-  return {
-    frame: "next",
-    veil: 0,
-    sceneOpacity: 1,
-    title: 0
-  };
+function setAuthenticated(user) {
+  state.user = user;
+  authView.classList.add("is-hidden");
+  translatorView.classList.remove("is-hidden");
+  renderConversation();
+  renderSessionList();
 }
 
-function getSceneFrame(local, zone) {
-  const delay = Number(zone.element.dataset.frameDelay ?? 0);
-  const holdTail = Number(zone.element.dataset.frameHoldTail ?? 0);
-  const available = Math.max(0.01, 1 - delay);
-  const delayedLocal = clamp((local - delay) / available, 0, 1);
-  const animPortion = holdTail > 0 ? 1 - holdTail : 1;
-  const animLocal = animPortion >= 1 ? delayedLocal : clamp(delayedLocal / animPortion, 0, 1);
-  const eased = easeInOutCubic(animLocal);
-  const frame = lerp(zone.frameStart, zone.frameEnd, eased);
-  return clamp(Math.round(frame), zone.frameStart, zone.frameEnd);
+function setLoggedOut() {
+  state.user = null;
+  closeDrawer();
+  authView.classList.remove("is-hidden");
+  translatorView.classList.add("is-hidden");
+  authMessage.textContent = "";
+  accessIdInput.focus();
 }
 
-function getFrameState() {
-  const lastFrame = frameCount - 1;
-
-  if (!zones.length) {
-    const linear = getScrollProgress();
-    const frame = Math.round(linear * lastFrame);
-    return {
-      frameA: frame,
-      frameBase: defaultFrameBase,
-      frameB: frame,
-      blend: 0,
-      veil: 0,
-      sceneOpacity: 1,
-      title: 0,
-      bridge: null
-    };
-  }
-
-  const active = getActiveZone();
-  const local = getZoneLocal(active);
-
-  if (active.type === "scene") {
-    const rounded = getSceneFrame(local, active);
-    return {
-      frameA: rounded,
-      frameBase: active.frameBase || defaultFrameBase,
-      frameCount: active.frameCount || frameCount,
-      frameB: rounded,
-      blend: 0,
-      veil: 0,
-      sceneOpacity: 1,
-      title: 0,
-      bridge: null
-    };
-  }
-
-  if (active.type === "bridge") {
-    const transition = getBridgeTransition(local, active);
-    const displayFrame =
-      transition.frame === "next" ? active.nextFrame : active.holdFrame;
-    const displayBase =
-      transition.frame === "next"
-        ? active.nextBase || defaultFrameBase
-        : active.holdBase || defaultFrameBase;
-
-    return {
-      frameA: displayFrame,
-      frameBase: displayBase,
-      frameCount: frameCount,
-      frameB: displayFrame,
-      blend: 0,
-      veil: transition.veil,
-      sceneOpacity: transition.sceneOpacity,
-      title: transition.title,
-      bridge: active,
-      snapFrame: true
-    };
-  }
-
-  const holdFrame = active.holdFrame ?? lastFrame;
-  const displayFrame =
-    active.type === "hold" && active.holdFrame === 0
-      ? Math.round(lerp(active.loopStart ?? 0, active.loopEnd ?? 59, getZoneLocal(active)))
-      : holdFrame;
-  return {
-    frameA: displayFrame,
-    frameBase: active.frameBase || defaultFrameBase,
-    frameCount: active.frameCount || frameCount,
-    frameB: displayFrame,
-    blend: 0,
-    veil: 0,
-    sceneOpacity: 1,
-    title: 0,
-    bridge: null,
-    snapFrame: active.type !== "hold" || active.holdFrame !== 0
-  };
+function setStatus(text) {
+  connectionState.textContent = text;
 }
 
-function updateTargetFromScroll() {
-  const state = getFrameState();
-  targetFrame = state.frameA;
-  targetFrameBase = state.frameBase || defaultFrameBase;
-  blendTarget = state.frameB;
-  blendAmount = state.blend;
-  veilAmount = state.veil ?? 0;
-  sceneOpacity = state.sceneOpacity ?? 1;
-  titleOpacity = state.title ?? 0;
+/* ───────── 会話（ターン）管理 ───────── */
 
-  if (state.snapFrame) {
-    currentFrame = targetFrame;
-    currentFrameBase = targetFrameBase;
-    renderFrames(targetFrame, targetFrameBase);
+function ensureSession() {
+  if (!state.sessionId) {
+    state.sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    state.sessionStartedAt = Date.now();
   }
+}
 
-  const bridge = state.bridge;
-  if (bridge && bridge !== activeBridge) {
-    activeBridge = bridge;
-    const kicker = bridge.nextKicker || "";
-    if (transitionKicker) {
-      transitionKicker.textContent = kicker;
-      transitionKicker.hidden = !kicker;
+function startNewTurn(original = "") {
+  ensureSession();
+  const turn = { original, translation: "", done: false };
+  state.turns.push(turn);
+  state.activeTurn = turn;
+  return turn;
+}
+
+function handleRealtimeEvent(event) {
+  if (event.type === "conversation.item.input_audio_transcription.completed") {
+    const text = (event.transcript || "").trim();
+    if (state.activeTurn && state.activeTurn.original === "") {
+      state.activeTurn.original = text;
+    } else {
+      startNewTurn(text);
     }
-    if (transitionHeading) transitionHeading.textContent = bridge.nextTitle || "";
-  } else if (!bridge) {
-    activeBridge = null;
-  }
-}
-
-function updatePanelVisibility(active) {
-  if (!active || active.type === "bridge") {
-    chapterTargets.forEach((target) => target.classList.remove("is-visible"));
-    return;
+    renderConversation();
+    saveCurrentSession();
   }
 
-  const readableTop = window.innerHeight * 0.16;
-  const readableBottom = window.innerHeight * 0.84;
-  const local = getZoneLocal(active);
-  const activeIndex = zones.indexOf(active);
-  const isFirstScene = activeIndex === 0;
-  const canRevealText = active.type === "hold" || isFirstScene || local >= SCENE_TEXT_REVEAL_AT;
-
-  chapterTargets.forEach((target) => {
-    const host = target.closest("[data-scroll-zone]");
-    const rect = target.getBoundingClientRect();
-    const isInActiveZone = host === active.element;
-    const isReadable = rect.top < readableBottom && rect.bottom > readableTop;
-
-    target.classList.toggle("is-visible", isInActiveZone && isReadable && canRevealText);
-  });
-}
-
-function updateChapter(active) {
-  if (!active || active.type === "bridge") return;
-
-  const activeIndex = zones.indexOf(active);
-  const isFirstScene = activeIndex === 0;
-  if (active.type === "scene" && !isFirstScene && getZoneLocal(active) < SCENE_TEXT_REVEAL_AT) {
-    return;
+  if (
+    event.type === "response.audio_transcript.delta" ||
+    event.type === "response.output_audio_transcript.delta" ||
+    event.type === "response.text.delta" ||
+    event.type === "response.output_text.delta"
+  ) {
+    if (!event.delta) return;
+    if (!state.activeTurn || state.activeTurn.done) startNewTurn("");
+    state.activeTurn.translation += event.delta;
+    renderConversation();
   }
 
-  const targetsInActiveZone = chapterTargets.filter(
-    (target) => target.closest("[data-scroll-zone]") === active.element
-  );
-  const candidates = targetsInActiveZone.length ? targetsInActiveZone : chapterTargets;
-  const viewportCenter = window.innerHeight * 0.5;
-  let nextIndex = 0;
-  let smallestDistance = Infinity;
-
-  candidates.forEach((target) => {
-    const rect = target.getBoundingClientRect();
-    const center = rect.top + rect.height * 0.5;
-    const distance = Math.abs(center - viewportCenter);
-
-    if (distance < smallestDistance) {
-      smallestDistance = distance;
-      nextIndex = chapterTargets.indexOf(target);
+  if (
+    event.type === "response.audio_transcript.done" ||
+    event.type === "response.output_audio_transcript.done" ||
+    event.type === "response.text.done" ||
+    event.type === "response.output_text.done"
+  ) {
+    const doneText = (event.transcript || event.text || "").trim();
+    if (state.activeTurn) {
+      if (doneText) state.activeTurn.translation = doneText;
+      state.activeTurn.done = true;
     }
-  });
-
-  if (nextIndex === activeChapterIndex) return;
-
-  activeChapterIndex = nextIndex;
-  const current = chapterTargets[nextIndex];
-
-  chapterCurrent.textContent = current.dataset.chapter || String(nextIndex + 1).padStart(2, "0");
-  chapterLabel.textContent = current.dataset.title || "";
-  chapterTotal.textContent = String(chapterTargets.length).padStart(2, "0");
-  document.body.dataset.activeChapter = current.dataset.chapter || String(nextIndex + 1);
-}
-
-function updateDepth() {
-  document.documentElement.style.setProperty("--scroll-progress", getScrollProgress().toFixed(4));
-}
-
-function updateActiveZone() {
-  const active = getActiveZone();
-  if (!active) return null;
-
-  document.body.dataset.activeZone = active.type || "";
-  document.documentElement.style.setProperty("--transition-veil", veilAmount.toFixed(4));
-  document.documentElement.style.setProperty("--scene-opacity", sceneOpacity.toFixed(4));
-  document.documentElement.style.setProperty("--title-opacity", titleOpacity.toFixed(4));
-  document.documentElement.style.setProperty(
-    "--chrome-opacity",
-    Math.max(0, 1 - Math.max(veilAmount, titleOpacity)).toFixed(4)
-  );
-  if (transitionTitles) {
-    transitionTitles.style.opacity = titleOpacity.toFixed(4);
+    renderConversation();
+    saveCurrentSession();
   }
 
-  return active;
-}
-
-function preloadKeyFrames() {
-  [0, 55, 60, 116, 119, 178, 181, 239].forEach((index) => loadFrame(index));
-  [0, 24, 48, 72, 96, 120, 144, 168, 192, 216].forEach((index) => loadFrame(index));
-  [0, 12, 24, 36, 48, 60, 73].forEach((index) => loadFrame(index, "public/frames/childcare"));
-
-  for (let index = 0; index < Math.min(22, frameCount); index += 1) {
-    loadFrame(index);
+  if (event.type === "error") {
+    setStatus(event.error?.message || "Realtime API error");
   }
 }
 
-function preloadRest() {
-  const run = () => {
-    let index = 22;
-    const chunk = () => {
-      const limit = Math.min(index + 10, frameCount);
+function resetConversation() {
+  saveCurrentSession();
+  state.turns = [];
+  state.activeTurn = null;
+  state.sessionId = null;
+  state.sessionStartedAt = null;
+  state.viewingHistory = false;
+  renderConversation();
+}
 
-      for (; index < limit; index += 1) {
-        loadFrame(index);
-      }
+/* ───────── 会話のレンダリング ───────── */
 
-      if (index < frameCount) {
-        window.setTimeout(chunk, 80);
-      }
-    };
+const SPEAKER_SVG =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M11 5L6 9H2v6h4l5 4V5z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 010 7M19 5a9 9 0 010 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const MIC_DOT_SVG =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const AI_DOT_SVG =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3z" fill="currentColor"/></svg>';
 
-    chunk();
-  };
+function makeBubble({ type, lang, text, placeholder, badge, withSpeaker, typing }) {
+  const item = document.createElement("div");
+  item.className = "chat-item";
 
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(run, { timeout: 2200 });
+  const marker = document.createElement("div");
+  marker.className = `chat-marker ${type}`;
+  marker.innerHTML = `<span class="dot">${type === "translation" ? AI_DOT_SVG : MIC_DOT_SVG}</span>`;
+  item.appendChild(marker);
+
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${type === "translation" ? "translation" : ""}`.trim();
+
+  const head = document.createElement("div");
+  head.className = "bubble-head";
+  const langEl = document.createElement("span");
+  langEl.className = "bubble-lang";
+  langEl.textContent = lang;
+  head.appendChild(langEl);
+  if (withSpeaker) {
+    const speak = document.createElement("button");
+    speak.className = "speak-button";
+    speak.type = "button";
+    speak.setAttribute("aria-label", "音声を再生");
+    speak.innerHTML = SPEAKER_SVG;
+    speak.addEventListener("click", () => {
+      remoteAudio.play().catch(() => showToast("音声再生を許可してください"));
+    });
+    head.appendChild(speak);
+  }
+  bubble.appendChild(head);
+
+  const body = document.createElement("p");
+  body.className = `bubble-text ${placeholder ? "is-placeholder" : ""}`.trim();
+  if (typing) {
+    body.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
   } else {
-    window.setTimeout(run, 1200);
+    body.textContent = text;
+  }
+  bubble.appendChild(body);
+
+  if (badge) {
+    const badgeEl = document.createElement("span");
+    badgeEl.className = "ai-badge";
+    badgeEl.innerHTML = `${AI_DOT_SVG} AI翻訳`;
+    bubble.appendChild(badgeEl);
+  }
+
+  item.appendChild(bubble);
+  return item;
+}
+
+function renderConversation() {
+  chatList.innerHTML = "";
+
+  if (state.turns.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "chat-empty";
+    empty.innerHTML =
+      '<div class="chat-empty-icon">🎙️</div>マイクをタップして<br>会話を始めましょう。<br>話した言語を自動で判別して翻訳します。';
+    chatList.appendChild(empty);
+    return;
+  }
+
+  for (const turn of state.turns) {
+    if (turn.original) {
+      chatList.appendChild(
+        makeBubble({ type: "original", lang: "聞き取り", text: turn.original })
+      );
+    }
+    const hasTranslation = turn.translation.length > 0;
+    if (hasTranslation || turn.original) {
+      chatList.appendChild(
+        makeBubble({
+          type: "translation",
+          lang: "翻訳",
+          text: turn.translation,
+          typing: !hasTranslation && !turn.done,
+          badge: hasTranslation,
+          withSpeaker: hasTranslation
+        })
+      );
+    }
+  }
+
+  chatList.scrollTop = chatList.scrollHeight;
+}
+
+/* ───────── 履歴の保存・読み込み ───────── */
+
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+  } catch {
+    return [];
   }
 }
 
-function observePanels() {
-  chapterTargets.forEach((target) => target.classList.remove("is-visible"));
+function saveHistory(list) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 100)));
+  } catch {
+    /* ストレージ不可は無視 */
+  }
 }
 
-function renderFrames(frameA, base = defaultFrameBase) {
-  drawCover(loadFrame(frameA, base), context, canvas);
-  blendCanvas.style.opacity = "0";
+function saveCurrentSession() {
+  const meaningful = state.turns.filter((t) => t.original || t.translation);
+  if (!state.sessionId || meaningful.length === 0) return;
+
+  const list = loadHistory();
+  const record = {
+    id: state.sessionId,
+    startedAt: state.sessionStartedAt,
+    updatedAt: Date.now(),
+    turns: meaningful.map((t) => ({ original: t.original, translation: t.translation }))
+  };
+
+  const index = list.findIndex((s) => s.id === state.sessionId);
+  if (index >= 0) list[index] = record;
+  else list.unshift(record);
+
+  list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  saveHistory(list);
+  renderSessionList();
 }
 
-function tick() {
-  if (currentFrameBase !== targetFrameBase) {
-    currentFrameBase = targetFrameBase;
-    currentFrame = targetFrame;
+function dayLabel(timestamp) {
+  const d = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const same = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (same(d, today)) return "今日";
+  if (same(d, yesterday)) return "昨日";
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function timeLabel(timestamp) {
+  const d = new Date(timestamp);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function renderSessionList() {
+  const list = loadHistory();
+  sessionList.innerHTML = "";
+
+  if (list.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "session-empty";
+    empty.textContent = "まだ履歴がありません。";
+    sessionList.appendChild(empty);
+    return;
   }
 
-  const delta = targetFrame - currentFrame;
-  const frameLerp = isMobileViewport() ? MOBILE_FRAME_LERP : DESKTOP_FRAME_LERP;
-  currentFrame += prefersReducedMotion ? delta : delta * frameLerp;
+  let lastDay = null;
+  for (const session of list) {
+    const day = dayLabel(session.updatedAt || session.startedAt);
+    if (day !== lastDay) {
+      const header = document.createElement("div");
+      header.className = "session-day";
+      header.textContent = day;
+      sessionList.appendChild(header);
+      lastDay = day;
+    }
 
-  if (Math.abs(delta) < 0.08) {
-    currentFrame = targetFrame;
+    const first = session.turns[0] || {};
+    const preview = (first.original || first.translation || "会話").replace(/\s+/g, " ").trim();
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "session-item";
+    if (session.id === state.sessionId) item.classList.add("is-active");
+
+    const title = document.createElement("span");
+    title.className = "session-title";
+    title.textContent = preview;
+
+    const meta = document.createElement("span");
+    meta.className = "session-meta";
+    meta.textContent = `${timeLabel(session.updatedAt || session.startedAt)} ・ ${session.turns.length}件`;
+
+    item.append(title, meta);
+    item.addEventListener("click", () => loadSession(session.id));
+    sessionList.appendChild(item);
   }
-
-  const active = getActiveZone();
-  const activeFrameCount = active?.frameBase === currentFrameBase ? active.frameCount || frameCount : frameCount;
-  const frameIndex = clamp(Math.round(currentFrame), 0, activeFrameCount - 1);
-  renderFrames(frameIndex, currentFrameBase);
-  warmNearby(frameIndex, currentFrameBase, activeFrameCount);
-  requestAnimationFrame(tick);
 }
 
-function handleScroll() {
-  updateTargetFromScroll();
-  updateDepth();
-  const active = updateActiveZone();
-  updatePanelVisibility(active);
-  updateChapter(active);
+function loadSession(id) {
+  if (state.pc) stopRealtime();
+  saveCurrentSession();
+
+  const session = loadHistory().find((s) => s.id === id);
+  if (!session) return;
+
+  state.turns = session.turns.map((t) => ({
+    original: t.original,
+    translation: t.translation,
+    done: true
+  }));
+  state.activeTurn = null;
+  state.sessionId = session.id;
+  state.sessionStartedAt = session.startedAt;
+  state.viewingHistory = true;
+
+  renderConversation();
+  renderSessionList();
+  closeDrawer();
 }
 
-function handleResize() {
-  buildZones();
-  handleScroll();
-  renderFrames(clamp(Math.round(currentFrame), 0, frameCount - 1), currentFrameBase);
-}
+/* ───────── ドロワー ───────── */
 
-window.addEventListener("scroll", handleScroll, { passive: true });
-window.addEventListener("resize", handleResize);
-MOBILE_MQ.addEventListener("change", handleResize);
-
-window.addEventListener("pageshow", () => {
-  if (location.hash) return;
-
+function openDrawer() {
+  renderSessionList();
+  drawerOverlay.hidden = false;
   requestAnimationFrame(() => {
-    window.scrollTo(0, 0);
-    handleResize();
+    drawer.classList.add("is-open");
+    drawerOverlay.classList.add("is-open");
   });
+}
+
+function closeDrawer() {
+  drawer.classList.remove("is-open");
+  drawerOverlay.classList.remove("is-open");
+  setTimeout(() => {
+    if (!drawer.classList.contains("is-open")) drawerOverlay.hidden = true;
+  }, 320);
+}
+
+/* ───────── トースト ───────── */
+
+let toastTimer = null;
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.add("is-visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 1800);
+}
+
+/* ───────── リアルタイム翻訳 ───────── */
+
+function sendSessionUpdate() {
+  if (!state.dc || state.dc.readyState !== "open") return;
+
+  state.dc.send(JSON.stringify({
+    type: "session.update",
+    session: {
+      type: "realtime",
+      instructions: buildInstructions(),
+      output_modalities: ["audio"],
+      audio: {
+        input: {
+          transcription: { model: "gpt-4o-transcribe" },
+          turn_detection: { type: "server_vad", threshold: 0.5, silence_duration_ms: 520 }
+        },
+        output: { voice: "marin" }
+      }
+    }
+  }));
+}
+
+async function startRealtime() {
+  if (state.pc) return;
+
+  if (state.viewingHistory) {
+    state.turns = [];
+    state.activeTurn = null;
+    state.sessionId = null;
+    state.sessionStartedAt = null;
+    state.viewingHistory = false;
+    renderConversation();
+  }
+
+  setStatus("マイク権限を確認中");
+  micButton.disabled = true;
+
+  try {
+    const { clientSecret } = await api("/api/realtime-token", { method: "POST", body: "{}" });
+
+    const pc = new RTCPeerConnection();
+    const dc = pc.createDataChannel("oai-events");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+
+    stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+    pc.ontrack = (event) => {
+      remoteAudio.srcObject = event.streams[0];
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setStatus("翻訳中");
+      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
+        if (state.pc === pc) stopRealtime("接続終了");
+      }
+    };
+
+    dc.addEventListener("open", () => {
+      sendSessionUpdate();
+      setStatus("翻訳中");
+    });
+
+    dc.addEventListener("message", (message) => {
+      try {
+        handleRealtimeEvent(JSON.parse(message.data));
+      } catch {
+        setStatus("イベント解析エラー");
+      }
+    });
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    const answer = await fetch("https://api.openai.com/v1/realtime/calls", {
+      method: "POST",
+      body: offer.sdp,
+      headers: { Authorization: `Bearer ${clientSecret}`, "Content-Type": "application/sdp" }
+    });
+
+    if (!answer.ok) throw new Error(await answer.text());
+
+    await pc.setRemoteDescription({ type: "answer", sdp: await answer.text() });
+
+    state.pc = pc;
+    state.dc = dc;
+    state.stream = stream;
+    translatorView.classList.add("is-live");
+    micButton.setAttribute("aria-pressed", "true");
+    micLabel.textContent = "タップして停止";
+  } catch (error) {
+    stopRealtime();
+    setStatus(error.message.includes("Permission") ? "マイク権限が必要です" : error.message);
+  } finally {
+    micButton.disabled = false;
+  }
+}
+
+function stopRealtime(status = "待機中") {
+  if (state.dc) state.dc.close();
+  if (state.pc) state.pc.close();
+  if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
+
+  state.pc = null;
+  state.dc = null;
+  state.stream = null;
+  state.activeTurn = null;
+  translatorView.classList.remove("is-live");
+  micButton.setAttribute("aria-pressed", "false");
+  micLabel.textContent = "タップして開始";
+  setStatus(status);
+  saveCurrentSession();
+}
+
+/* ───────── 起動・イベント ───────── */
+
+async function boot() {
+  try {
+    const { user } = await api("/api/me");
+    setAuthenticated(user);
+  } catch {
+    setLoggedOut();
+  }
+}
+
+async function handleLogin() {
+  authMessage.textContent = "";
+  try {
+    const { user } = await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ accessId: accessIdInput.value.trim() })
+    });
+    accessIdInput.value = "";
+    setAuthenticated(user);
+  } catch (error) {
+    authMessage.textContent = error.message;
+  }
+}
+
+loginForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  handleLogin();
+});
+loginSubmit.addEventListener("click", handleLogin);
+
+logoutButton.addEventListener("click", async () => {
+  stopRealtime();
+  await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
+  setLoggedOut();
 });
 
-loadFrame(0).addEventListener("load", () => renderFrames(0), { once: true });
-buildZones();
-preloadKeyFrames();
-preloadRest();
-observePanels();
-handleScroll();
-tick();
+micButton.addEventListener("click", () => {
+  if (state.pc) stopRealtime();
+  else startRealtime();
+});
+
+historyButton.addEventListener("click", openDrawer);
+drawerClose.addEventListener("click", closeDrawer);
+drawerOverlay.addEventListener("click", closeDrawer);
+
+newConversationButton.addEventListener("click", () => {
+  if (state.pc) stopRealtime();
+  resetConversation();
+  closeDrawer();
+  showToast("新しい会話を開始しました");
+});
+
+window.addEventListener("beforeunload", saveCurrentSession);
+
+boot();

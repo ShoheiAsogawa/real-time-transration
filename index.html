@@ -3,240 +3,142 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>アマミノクロウサギ | 奄美大島と徳之島だけの天然記念物</title>
+    <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <title>LinguaLive | Realtime Translator</title>
     <meta
       name="description"
-      content="わきゃあまみ8『アマミノクロウサギブック』をもとに、奄美大島と徳之島だけに生息するアマミノクロウサギの体、すみか、食べもの、子育て、保全を紹介します。"
+      content="OpenAI Realtime APIを使った、招待ID制のブラウザ向けリアルタイム翻訳Webアプリ。"
     />
-    <link rel="preload" as="image" href="public/frames/frame_000001.jpg" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="logo.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="frame-stage" aria-hidden="true">
-      <canvas id="sequence" width="1280" height="720"></canvas>
-      <canvas id="sequence-blend" class="sequence-blend" width="1280" height="720"></canvas>
-      <div class="color-grade"></div>
-      <div class="film-texture"></div>
-      <div class="edge-mask"></div>
-      <div class="transition-veil"></div>
-      <div class="transition-titles" aria-hidden="true">
-        <div class="transition-title" data-title-id="next">
-          <p class="transition-kicker"></p>
-          <h2 class="transition-heading"></h2>
-        </div>
-      </div>
-    </div>
-
-    <div class="top-chrome">
-      <header class="site-header">
-        <a class="wordmark" href="#top" aria-label="ページ先頭へ">
-          <span>AMAMI</span>
-          <span>BLACK RABBIT</span>
-        </a>
-
-        <aside class="chapter-bar" aria-hidden="true">
-          <div class="chapter-bar-row">
-            <span class="chapter-current">01</span>
-            <span class="chapter-track"><span class="chapter-fill"></span></span>
-            <span class="chapter-total">07</span>
+    <div class="app-shell">
+      <!-- ───────── ログイン ───────── -->
+      <section class="auth-view" id="authView" aria-labelledby="loginTitle">
+        <div class="auth-hero">
+          <div class="app-icon" aria-hidden="true">
+            <svg width="80" height="80" viewBox="0 0 120 120" fill="none">
+              <defs>
+                <linearGradient id="bubbleTop" x1="20" y1="12" x2="72" y2="60" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#3F7CFF" />
+                  <stop offset="1" stop-color="#6A38E6" />
+                </linearGradient>
+                <linearGradient id="bubbleBot" x1="52" y1="56" x2="106" y2="104" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#23C4FF" />
+                  <stop offset="1" stop-color="#2E73FF" />
+                </linearGradient>
+                <linearGradient id="arrow" x1="8" y1="8" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#36A0FF" />
+                  <stop offset="1" stop-color="#1E5BFF" />
+                </linearGradient>
+              </defs>
+              <g stroke="url(#arrow)" stroke-width="7.5" stroke-linecap="round" fill="none">
+                <path d="M70 9 A52 52 0 0 1 112 55" />
+                <path d="M50 111 A52 52 0 0 1 8 65" />
+              </g>
+              <path fill="url(#arrow)" d="M112 55 l8 -3 l-10 -7 z" />
+              <path fill="url(#arrow)" d="M8 65 l-8 3 l10 7 z" />
+              <path fill="url(#bubbleBot)" d="M67 55 H91 a15 15 0 0 1 15 15 V83 a15 15 0 0 1 -15 15 H80 l-3 12 l-10 -12 H67 a15 15 0 0 1 -15 -15 V70 a15 15 0 0 1 15 -15 Z" />
+              <text x="79" y="86" text-anchor="middle" fill="#fff" font-family="'Hiragino Sans','Yu Gothic UI',sans-serif" font-size="30" font-weight="700">あ</text>
+              <path fill="url(#bubbleTop)" d="M33 13 H57 a15 15 0 0 1 15 15 V41 a15 15 0 0 1 -15 15 H42 l-10 12 l0 -12 H33 a15 15 0 0 1 -15 -15 V28 a15 15 0 0 1 15 -15 Z" />
+              <text x="45" y="45" text-anchor="middle" fill="#fff" font-family="-apple-system,'SF Pro Display',Arial,sans-serif" font-size="30" font-weight="800">A</text>
+            </svg>
           </div>
-          <p class="chapter-label">アマミノクロウサギ</p>
-        </aside>
-
-        <div class="header-meta">
-          <span>奄美大島 / 徳之島</span>
+          <h1 id="loginTitle">LinguaLive</h1>
+          <p class="auth-subtitle">リアルタイム翻訳</p>
         </div>
-      </header>
-    </div>
 
-    <main id="top" class="story">
-      <div
-        class="scene-block"
-        data-scroll-zone="scene"
-        data-frame-start="0"
-        data-frame-end="55"
-        data-px-per-frame="32"
-        data-frame-delay="0.22"
-        data-frame-hold-tail="0.24"
-      >
-        <section class="panel hero panel-focus-left panel-valign-bottom" data-chapter="01" data-title="アマミノクロウサギ">
-          <div class="panel-inner">
-            <p class="kicker">国の特別天然記念物 / 絶滅危惧種</p>
-            <h1 class="title-hero">アマミノクロウサギ</h1>
-            <p class="lead copy">
-              奄美大島と徳之島だけに生き残った、古いすがたのウサギ。<br />
-              森の巣穴で休み、夜になると静かに動き出します。
-            </p>
-          </div>
-        </section>
-
-        <section class="panel panel-focus-left panel-valign-center panel-stack" data-chapter="02" data-title="どんな生き物？">
-          <div class="panel-inner">
-            <h2 class="title-line">どんな生き物？</h2>
-            <p class="copy section-lead">短い耳、太い足、強い爪。森を歩くための体です。</p>
-            <p class="copy">
-              アマミノクロウサギは「生きた化石」とよばれることがあります。<br />
-              ノウサギやアナウサギとは違う、原始的なすがたを残しています。
-            </p>
-
-            <div class="panel-block">
-              <p class="kicker">PDFからの基本データ</p>
-              <div class="fact-strip">
-                <span><strong>380-515mm</strong>おとなの全長</span>
-                <span><strong>短い</strong>耳としっぽ</span>
-                <span><strong>シシー</strong>高いなき声</span>
-              </div>
-              <p class="copy prose-tight">
-                毛は外側が茶色、内側が灰色。目は小さく、光が当たると赤く光ります。<br />
-                がんじょうな爪で深い巣穴を掘り、急な斜面も上り下りできます。
-              </p>
+        <div class="auth-form-area">
+          <form class="form-group" id="loginForm" autocomplete="off">
+            <div class="form-row">
+              <label for="accessId">アクセスID</label>
+              <input
+                id="accessId"
+                name="accessId"
+                inputmode="text"
+                autocapitalize="none"
+                spellcheck="false"
+                required
+              />
             </div>
-          </div>
-        </section>
-      </div>
+          </form>
+          <p class="form-message" id="authMessage" role="status"></p>
 
-      <section
-        class="interlude"
-        data-scroll-zone="bridge"
-        data-hold-frame="55"
-        data-next-frame="60"
-        data-next-title="どんなすみかに住んでいるの？"
-        aria-hidden="true"
-      ></section>
+          <button class="app-button primary" id="loginSubmit" type="button">ログイン</button>
 
-      <div
-        class="scene-block"
-        data-scroll-zone="scene"
-        data-frame-start="60"
-        data-frame-end="116"
-        data-px-per-frame="42"
-        data-frame-hold-tail="0.22"
-      >
-        <section class="panel panel-centered panel-valign-center" data-chapter="03" data-title="森の巣穴">
-          <div class="panel-inner">
-            <p class="kicker">昼は休み、夜に動く</p>
-            <h2 class="title-line">森の巣穴</h2>
-            <p class="copy">
-              巣穴は森の斜面、岩のすき間、木の根元などにあります。<br />
-              休けい用と子育て用があり、中心にして数ヘクタールの範囲で暮らします。<br />
-              開けた林道や川原には、食べものやフンの場所として出てくることがあります。
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <section
-        class="interlude"
-        data-scroll-zone="bridge"
-        data-hold-frame="116"
-        data-next-frame="0"
-        data-next-base="public/frames/childcare"
-        data-next-title="子育てはどうやってするの？"
-        aria-hidden="true"
-      ></section>
-
-      <div
-        class="scene-block"
-        data-scroll-zone="scene"
-        data-frame-base="public/frames/childcare"
-        data-frame-start="0"
-        data-frame-end="73"
-        data-px-per-frame="36"
-        data-frame-hold-tail="0.22"
-      >
-        <section class="panel panel-centered panel-valign-center" data-chapter="04" data-title="巣穴で育てる">
-          <div class="panel-inner">
-            <p class="kicker">入口を土でふさぐ</p>
-            <h2 class="title-line">巣穴で育てる</h2>
-            <p class="copy">
-              母親は子育て用の巣穴をつくり、離れるときは入口を土でふさぎます。<br />
-              子どもは中で1匹で過ごし、母親が来るのは2日に1回ほど。<br />
-              1か月から1か月半ほどで、巣穴の外へ出るようになります。
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <section
-        class="interlude"
-        data-scroll-zone="bridge"
-        data-hold-base="public/frames/childcare"
-        data-hold-frame="73"
-        data-next-frame="181"
-        data-next-title="何を食べているの？"
-        aria-hidden="true"
-      ></section>
-
-      <div
-        class="scene-block"
-        data-scroll-zone="scene"
-        data-frame-start="181"
-        data-frame-end="239"
-        data-px-per-frame="34"
-        data-frame-hold-tail="0.2"
-      >
-        <section class="panel panel-centered panel-valign-center" data-chapter="05" data-title="食べものとフン">
-          <div class="panel-inner">
-            <p class="kicker">森の植物を少しずつ</p>
-            <h2 class="title-line">食べものとフン</h2>
-            <p class="copy">
-              葉、くき、種、木の皮など、さまざまな植物を食べます。<br />
-              シイの実、シダ、ススキ、ヤマビワソウ、エゴノキなど、奄美の森の豊かさが支えています。<br />
-              フンは丸い形が基本で、林道や川原のような見通しのよい場所でよく見つかります。
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <section
-        class="interlude"
-        data-scroll-zone="bridge"
-        data-hold-frame="239"
-        data-next-frame="0"
-        data-next-title="なぜ減ってしまうの？"
-        aria-hidden="true"
-      ></section>
-
-      <section class="panel panel-centered panel-spot panel-valign-center" data-scroll-zone="hold" data-hold-frame="0" data-hold-ratio="1.75" data-chapter="06" data-title="ピンチと保全">
-        <div class="panel-inner">
-          <p class="kicker">外から来たものと、人の暮らし</p>
-          <h2 class="title-line">ピンチと保全</h2>
-          <p class="copy">
-            森林伐採はすみかをうばい、マングースは多くの在来生物に被害を与えました。<br />
-            ノイヌ・ノネコによる捕食も、アマミノクロウサギの大きな脅威です。
-          </p>
-          <p class="copy prose-tight">
-            PDFでは、マングースを減らす取り組み、交通事故防止の看板、犬・ねこの適正飼育、<br />
-            けがをした個体の救護、学校や地域で知ってもらう活動が紹介されています。
-          </p>
+          <p class="auth-footer">発行済みアクセスIDでログインできます。</p>
         </div>
       </section>
 
-      <section
-        class="interlude"
-        data-scroll-zone="bridge"
-        data-hold-frame="59"
-        data-next-frame="0"
-        data-next-title="ロードキルについて"
-        data-fade-to-black-end="0.16"
-        data-title-end="0.62"
-        aria-hidden="true"
-      ></section>
+      <!-- ───────── 翻訳 ───────── -->
+      <main class="translator-view is-hidden" id="translatorView">
+        <header class="nav-bar">
+          <span class="nav-spacer" aria-hidden="true"></span>
+          <h2 class="nav-title">Lingua<span>Live</span></h2>
+          <button class="nav-icon-button" id="historyButton" type="button" aria-label="履歴">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+              <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </header>
 
-      <section class="panel panel-centered panel-valign-center finale" data-scroll-zone="hold" data-hold-frame="0" data-hold-ratio="1" data-chapter="07" data-title="ロードキルについて">
-        <div class="panel-inner">
-          <p class="kicker">夜の道で起きる事故</p>
-          <h2 class="title-line">ロードキルについて</h2>
-          <p class="copy">
-            アマミノクロウサギは夜に動き、林道や国道・県道にも出てきます。<br />
-            交通量が多くスピードの出やすい道では、事故が起きやすくなります。<br />
-            奄美の森の近くを走る夜は、ライトの先をよく見て、ゆっくり進んでください。
-          </p>
-          <p class="note">参考: わきゃあまみ8「アマミノクロウサギブック」</p>
+        <div class="live-pill-wrap">
+          <div class="live-pill" id="livePill">
+            <span class="live-dot"></span>
+            <span id="connectionState">待機中</span>
+          </div>
         </div>
-      </section>
-    </main>
 
-    <script src="script.js"></script>
+        <div class="chat-list" id="chatList" aria-live="polite">
+          <!-- 会話カードが JS で挿入されます -->
+        </div>
+
+        <div class="mic-dock">
+          <button class="mic-fab" id="micButton" type="button" aria-pressed="false">
+            <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
+              <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+              <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
+              <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+            </svg>
+            <span class="visually-hidden" id="micLabel">タップして開始</span>
+          </button>
+        </div>
+
+        <audio id="remoteAudio" autoplay playsinline></audio>
+      </main>
+
+      <!-- ───────── 履歴ドロワー ───────── -->
+      <div class="drawer-overlay" id="drawerOverlay" hidden></div>
+      <aside class="drawer" id="drawer" aria-label="翻訳履歴">
+        <div class="drawer-header">
+          <h3>履歴</h3>
+          <button class="nav-icon-button" id="drawerClose" type="button" aria-label="閉じる">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <button class="new-conv-button" id="newConversationButton" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          新しい会話
+        </button>
+        <div class="session-list" id="sessionList"></div>
+        <button class="logout-link" id="logoutButton" type="button">ログアウト</button>
+      </aside>
+
+      <!-- トースト -->
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="script.js" type="module"></script>
   </body>
 </html>

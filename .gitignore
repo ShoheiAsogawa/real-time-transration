@@ -1,0 +1,6 @@
+.env
+.dev.vars
+.wrangler/
+.claude/
+node_modules/
+screenshots/
