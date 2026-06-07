@@ -4,5 +4,5 @@ pages_build_output_dir = "."
 
 [[kv_namespaces]]
 binding = "SESSION_KV"
-id = "replace-with-production-kv-namespace-id"
-preview_id = "replace-with-preview-kv-namespace-id"
+id = "c4c6e1d7b1b241e2be88f39cf8cff915"
+preview_id = "c4c6e1d7b1b241e2be88f39cf8cff915"
