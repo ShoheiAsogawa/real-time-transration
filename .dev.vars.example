@@ -1,9 +1,23 @@
+# ローカル wrangler pages dev 用の設定ファイル（.gitignore で除外すること）
+# cp .dev.vars.example .dev.vars  →  値を実際のものに書き換えて使用
+
+# ── 必須 ────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY=sk-proj-replace-me
 SESSION_SECRET=replace-with-at-least-32-random-bytes
+
+# ── ユーザー認証 ─────────────────────────────────────────────────────────────
 ALLOWED_LOGIN_IDS=team_7KQ4-9W2P,staff_K8LA-2M9X
+
+# シードユーザーの初期パスワードハッシュ（npm run hash-password -- <PASSWORD>）
+# SEED_USER_PASSWORD_HASH=
+
+# ── 管理者 ───────────────────────────────────────────────────────────────────
 ADMIN_EMAIL=admin@example.com
-# Generate with: npm run hash-password -- your-secure-password
+
+# npm run hash-password -- your-secure-password
 ADMIN_PASSWORD_HASH=100000:replace-me:replace-me
+
+# ── オプション ───────────────────────────────────────────────────────────────
 # ALLOWED_LOGIN_ID_HASHES=
 OPENAI_REALTIME_MODEL=gpt-realtime
 AUTH_MAX_ATTEMPTS=8
