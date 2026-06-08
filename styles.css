@@ -256,6 +256,20 @@ h1 .brand-accent,
   border-top: 1px solid var(--separator);
 }
 
+.form-row-submit {
+  padding-top: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+.form-row-submit .app-button {
+  width: 100%;
+}
+
+.form-group > .form-message {
+  padding: 0 1rem;
+  min-height: 1.25rem;
+}
+
 /* ── Forms ── */
 
 .form-group {

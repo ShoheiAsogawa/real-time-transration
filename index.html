@@ -64,7 +64,6 @@
                   autocapitalize="none"
                   spellcheck="false"
                   autocomplete="username"
-                  placeholder="例: user1 または team_XXXX-XXXX"
                   required
                 />
                 <button class="input-action-btn" id="pasteAccessId" type="button" title="クリップボードから貼り付け">貼り付け</button>
@@ -78,7 +77,6 @@
                   name="password"
                   type="password"
                   autocomplete="current-password"
-                  placeholder="••••••••"
                   required
                 />
                 <button class="password-toggle" id="accessPasswordToggle" type="button" aria-label="パスワードを表示">
@@ -92,10 +90,12 @@
                 </button>
               </div>
             </div>
+            <p class="form-message" id="authMessage" role="status"></p>
+            <div class="form-row form-row-submit">
+              <button class="app-button primary" id="loginSubmit" type="submit">ログイン</button>
+            </div>
           </form>
-          <p class="form-message" id="authMessage" role="status"></p>
-          <button class="app-button primary" id="loginSubmit" type="submit" form="loginForm">ログイン</button>
-          <p class="auth-footer">発行されたアクセスIDとパスワードを入力してください。</p>
+          <p class="auth-footer">AMALINK Translation</p>
         </div>
         </div>
       </section>
