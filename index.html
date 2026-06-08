@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-    <title>LinguaLive | Realtime Translator</title>
+    <title>AMALINK Translation</title>
     <meta
       name="description"
-      content="OpenAI Realtime APIを使った、招待ID制のブラウザ向けリアルタイム翻訳Webアプリ。"
+      content="AMALINK Translation — 招待ID制の多言語リアルタイム翻訳Webアプリ。"
     />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="logo.svg" type="image/svg+xml" />
@@ -48,8 +48,8 @@
               <text x="45" y="45" text-anchor="middle" fill="#fff" font-family="-apple-system,'SF Pro Display',Arial,sans-serif" font-size="30" font-weight="800">A</text>
             </svg>
           </div>
-          <h1 id="loginTitle">LinguaLive</h1>
-          <p class="auth-subtitle">話すだけで日英をリアルタイム翻訳</p>
+          <h1 id="loginTitle">AMALINK <span class="brand-accent">Translation</span></h1>
+          <p class="auth-subtitle">話すだけで多言語をリアルタイム翻訳</p>
         </div>
 
         <div class="auth-form-area">
@@ -63,87 +63,48 @@
                   inputmode="text"
                   autocapitalize="none"
                   spellcheck="false"
+                  autocomplete="username"
                   placeholder="例: user1 または team_XXXX-XXXX"
                   required
                 />
                 <button class="input-action-btn" id="pasteAccessId" type="button" title="クリップボードから貼り付け">貼り付け</button>
               </div>
             </div>
+            <div class="form-row form-row-separator">
+              <label for="accessPassword">パスワード</label>
+              <div class="password-field">
+                <input
+                  id="accessPassword"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="••••••••"
+                  required
+                />
+                <button class="password-toggle" id="accessPasswordToggle" type="button" aria-label="パスワードを表示">
+                  <svg class="icon-show" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                  <svg class="icon-hide" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M6.7 6.7C4.9 8 3.5 9.8 2 12c1.8 3.2 5.4 7 10 7 1.7 0 3.3-.5 4.7-1.3M9.9 5.1A10.7 10.7 0 0112 5c4.6 0 8.2 3.8 10 7a11.2 11.2 0 01-4.1 4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
           </form>
           <p class="form-message" id="authMessage" role="status"></p>
           <button class="app-button primary" id="loginSubmit" type="submit" form="loginForm">ログイン</button>
-          <p class="auth-footer">管理者から発行されたアクセスIDを入力してください。</p>
-          <button class="auth-secondary-btn" id="showAdminLogin" type="button">管理者ログイン</button>
+          <p class="auth-footer">発行されたアクセスIDとパスワードを入力してください。</p>
         </div>
         </div>
       </section>
 
-      <!-- ───────── 管理者ログイン ───────── -->
-      <section class="auth-view admin-auth-view is-hidden" id="adminAuthView" aria-labelledby="adminLoginTitle">
-        <div class="admin-auth-card">
-          <div class="auth-hero">
-            <div class="app-icon admin-auth-icon" aria-hidden="true">
-              <svg width="56" height="56" viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="3" width="18" height="18" rx="4" stroke="#3F7CFF" stroke-width="1.5"/>
-                <circle cx="12" cy="9" r="2.5" stroke="#3F7CFF" stroke-width="1.5"/>
-                <path d="M7 17c0-2.2 2.2-3.5 5-3.5s5 1.3 5 3.5" stroke="#2E73FF" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <h1 id="adminLoginTitle">管理画面</h1>
-            <p class="auth-subtitle">管理者アカウントでログイン</p>
-          </div>
-
-          <div class="auth-form-area">
-            <form class="form-group" id="adminLoginForm" autocomplete="on">
-              <div class="form-row">
-                <label for="adminEmail">メールアドレス</label>
-                <input
-                  id="adminEmail"
-                  name="email"
-                  type="email"
-                  inputmode="email"
-                  autocapitalize="none"
-                  spellcheck="false"
-                  autocomplete="username"
-                  placeholder="admin@example.com"
-                  required
-                />
-              </div>
-              <div class="form-row form-row-separator">
-                <label for="adminPassword">パスワード</label>
-                <div class="password-field">
-                  <input
-                    id="adminPassword"
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    placeholder="••••••••"
-                    required
-                  />
-                  <button class="password-toggle" id="adminPasswordToggle" type="button" aria-label="パスワードを表示">
-                    <svg class="icon-show" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2"/>
-                      <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-                    </svg>
-                    <svg class="icon-hide" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M6.7 6.7C4.9 8 3.5 9.8 2 12c1.8 3.2 5.4 7 10 7 1.7 0 3.3-.5 4.7-1.3M9.9 5.1A10.7 10.7 0 0112 5c4.6 0 8.2 3.8 10 7a11.2 11.2 0 01-4.1 4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </form>
-            <p class="form-message" id="adminAuthMessage" role="status"></p>
-            <button class="app-button primary" id="adminLoginSubmit" type="button">ログイン</button>
-            <button class="auth-secondary-btn" id="showUserLogin" type="button">← ユーザー画面へ戻る</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ───────── 翻訳（一般ユーザー・管理者共通） ───────── -->
+      <!-- ───────── 翻訳（一般ユーザー） ───────── -->
       <main class="translator-view is-hidden" id="translatorView">
         <header class="nav-bar">
           <span class="nav-spacer" aria-hidden="true"></span>
-          <h2 class="nav-title">Lingua<span>Live</span></h2>
+          <h2 class="nav-title">AMALINK <span>Translation</span></h2>
           <div class="nav-actions">
             <button class="nav-icon-button" id="historyButton" type="button" aria-label="履歴">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -186,114 +147,6 @@
         <audio id="remoteAudio" autoplay playsinline></audio>
       </main>
 
-      <!-- ───────── 管理画面（adminのみ） ───────── -->
-      <main class="admin-view is-hidden" id="adminView">
-        <header class="admin-header">
-          <div class="admin-header-brand">
-            <span class="admin-header-logo">Lingua<span>Live</span></span>
-            <span class="admin-header-badge">管理</span>
-          </div>
-          <div class="admin-header-actions">
-            <span class="admin-header-avatar" id="adminUserAvatar" aria-hidden="true"></span>
-            <span class="admin-header-user" id="adminUserLabel"></span>
-            <button class="admin-logout-btn" id="adminLogoutButton" type="button">ログアウト</button>
-          </div>
-        </header>
-
-        <div class="admin-content">
-          <div class="admin-page-intro">
-            <h2 class="admin-page-title">ユーザー管理</h2>
-            <p class="admin-page-desc">翻訳アプリにログインできるアクセスIDを発行・管理します。</p>
-          </div>
-
-          <div class="admin-stats">
-            <div class="admin-stat-card">
-              <span class="admin-stat-label">登録ユーザー</span>
-              <span class="admin-stat-value" id="adminStatUsers">—</span>
-            </div>
-            <div class="admin-stat-card">
-              <span class="admin-stat-label">表示中</span>
-              <span class="admin-stat-value admin-stat-value-sm" id="adminStatVisible">—</span>
-            </div>
-          </div>
-
-          <div class="admin-grid">
-          <section class="admin-card">
-            <div class="admin-card-head">
-              <h3 class="admin-card-title">新規ユーザーを追加</h3>
-              <p class="admin-card-desc">IDを追加したらコピーして、ユーザーに共有してください。</p>
-            </div>
-            <div class="admin-add-form">
-              <div class="admin-add-row">
-                <input
-                  class="admin-input"
-                  id="newUserId"
-                  type="text"
-                  placeholder="例: team_7KQ4-9W2P"
-                  autocapitalize="none"
-                  spellcheck="false"
-                />
-                <button class="admin-icon-btn" id="generateIdBtn" type="button" title="IDを自動生成" aria-label="IDを自動生成">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 4v6h6M20 20v-6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M20 8a8 8 0 00-14.9-3M4 16a8 8 0 0014.9 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <button class="admin-add-btn" id="addUserBtn" type="button">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                  </svg>
-                  追加
-                </button>
-              </div>
-              <button class="admin-quick-add" id="quickAddBtn" type="button">IDを自動生成して追加</button>
-              <p class="admin-add-message" id="addUserMessage" role="status"></p>
-            </div>
-          </section>
-
-          <section class="admin-card admin-card-list">
-            <div class="admin-card-head admin-card-head-row">
-              <div>
-                <h3 class="admin-card-title">登録済みユーザー</h3>
-                <p class="admin-card-desc">「コピー」でIDを共有。不要なIDは削除できます。</p>
-              </div>
-              <div class="admin-list-actions">
-                <button class="admin-refresh-btn" id="adminRefreshBtn" type="button" title="一覧を更新" aria-label="一覧を更新">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 4v6h6M20 20v-6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M20 8a8 8 0 00-14.9-3M4 16a8 8 0 0014.9 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <span class="admin-user-count" id="adminUserCount">—</span>
-              </div>
-            </div>
-            <div class="admin-search-wrap" id="adminSearchWrap" hidden>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-                <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-              <input
-                class="admin-search"
-                id="adminSearch"
-                type="search"
-                placeholder="IDで検索..."
-                autocapitalize="none"
-                spellcheck="false"
-              />
-              <button class="admin-search-clear" id="adminSearchClear" type="button" aria-label="検索をクリア" hidden>×</button>
-            </div>
-            <div class="admin-list-head" id="adminListHead" hidden>
-              <span>アクセスID</span>
-              <span>操作</span>
-            </div>
-            <div class="admin-user-list" id="adminUserList">
-              <p class="admin-loading"><span class="admin-spinner"></span>読み込み中...</p>
-            </div>
-          </section>
-          </div>
-        </div>
-      </main>
-
       <!-- ───────── 履歴ドロワー ───────── -->
       <div class="drawer-overlay" id="drawerOverlay" hidden></div>
       <aside class="drawer" id="drawer" aria-label="翻訳履歴">
@@ -312,22 +165,40 @@
           新しい会話
         </button>
         <div class="session-list" id="sessionList"></div>
+        <button class="settings-link" id="changePasswordBtn" type="button">パスワードを変更</button>
         <button class="logout-link" id="logoutButton" type="button">ログアウト</button>
       </aside>
 
-      <!-- トースト -->
-      <div class="toast" id="toast" role="status" aria-live="polite"></div>
-
-      <!-- 削除確認ダイアログ -->
-      <div class="dialog-overlay is-hidden" id="dialogOverlay">
-        <div class="dialog" id="confirmDialog">
-          <p class="dialog-message" id="dialogMessage">このユーザーを削除しますか？</p>
-          <div class="dialog-actions">
-            <button class="dialog-btn cancel" id="dialogCancel" type="button">キャンセル</button>
-            <button class="dialog-btn danger" id="dialogConfirm" type="button">削除</button>
-          </div>
+      <!-- パスワード変更 -->
+      <div class="password-overlay is-hidden" id="passwordOverlay" role="dialog" aria-modal="true" aria-labelledby="passwordDialogTitle">
+        <div class="password-dialog">
+          <h3 id="passwordDialogTitle">パスワードを変更</h3>
+          <p class="password-dialog-desc" id="passwordDialogDesc">新しいパスワードを設定してください。</p>
+          <form class="password-change-form" id="passwordChangeForm" autocomplete="off">
+            <div class="form-row">
+              <label for="currentPassword">現在のパスワード</label>
+              <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
+            </div>
+            <div class="form-row">
+              <label for="newPassword">新しいパスワード</label>
+              <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" placeholder="8文字以上" required />
+            </div>
+            <div class="form-row">
+              <label for="confirmPassword">新しいパスワード（確認）</label>
+              <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+            </div>
+            <p class="form-message" id="passwordChangeMessage" role="status"></p>
+            <div class="password-dialog-actions">
+              <button class="app-button secondary is-hidden" id="passwordCancelBtn" type="button">キャンセル</button>
+              <button class="app-button primary" id="passwordSubmitBtn" type="submit">変更する</button>
+            </div>
+          </form>
+          <button class="password-logout-link is-hidden" id="passwordLogoutBtn" type="button">ログアウト</button>
         </div>
       </div>
+
+      <!-- トースト -->
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
 
     <script src="script.js" type="module"></script>

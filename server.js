@@ -10,6 +10,12 @@ loadDotEnv(path.join(__dirname, ".env"));
 
 const port = Number(process.env.PORT || 3000);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const passwordPepperValue = String(process.env.PASSWORD_PEPPER || sessionSecret || "").trim();
+const PBKDF2_ITERATIONS_NEW = 210000;
+const DUMMY_PASSWORD_HASH =
+  "100000:00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000";
+const passwordMaxAttempts = Number(process.env.PASSWORD_MAX_ATTEMPTS || 5);
+const passwordChangeAttempts = new Map();
 const openaiApiKey = process.env.OPENAI_API_KEY || "";
 const realtimeModel = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
 const allowedOrigins = new Set(
@@ -40,7 +46,16 @@ const adminPasswordHash = String(
   process.env.ADMIN_PASSWORD_HASH ||
     "100000:5249adba9d8262a7ece249fc646bcd88:03f60ebcef08a074621d70a9548d13fa41668b9b104222c35f221d0b742d91f0"
 ).trim();
-const users = [...allowedPlainIds].map((id) => ({ id, role: "user", seeded: true }));
+const seedUserPasswordHash = String(
+  process.env.SEED_USER_PASSWORD_HASH ||
+    "100000:9ef51164921ca81a5a7e1b32b8b434f3:9c3d25891f6e8c6072fe100479e4f0032a66fe4fe6c9183e17a2bd4137061f40"
+).trim();
+const users = [...allowedPlainIds].map((id) => ({
+  id,
+  role: "user",
+  seeded: true,
+  passwordHash: seedUserPasswordHash
+}));
 
 function loadDotEnv(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -69,6 +84,29 @@ function hashPassword(password, salt, iterations = 100000) {
   return crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
 }
 
+function applyPasswordPepper(password) {
+  if (!passwordPepperValue) return password;
+  return `${passwordPepperValue}:${password}`;
+}
+
+function verifyStoredPassword(password, storedHash) {
+  if (passwordPepperValue) {
+    if (verifyPassword(applyPasswordPepper(password), storedHash)) return true;
+  }
+  return verifyPassword(password, storedHash);
+}
+
+function validateNewPassword(password, { current } = {}) {
+  const value = String(password || "");
+  if (!value || value.trim() !== value || value.includes("\0")) {
+    return "パスワードが無効です。";
+  }
+  if (value.length < 8) return "新しいパスワードは8文字以上必要です。";
+  if (value.length > 128) return "新しいパスワードが長すぎます。";
+  if (current && value === current) return "新しいパスワードは現在のパスワードと異なる必要があります。";
+  return null;
+}
+
 function parsePasswordHash(storedHash) {
   const value = String(storedHash || "").trim();
   if (!value) return null;
@@ -88,6 +126,70 @@ function verifyPassword(password, storedHash) {
   const actualBuffer = Buffer.from(actualHash);
   const expectedBuffer = Buffer.from(expectedHash);
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function createPasswordHash(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const material = applyPasswordPepper(String(password || ""));
+  const hash = hashPassword(material, salt, PBKDF2_ITERATIONS_NEW);
+  return `${PBKDF2_ITERATIONS_NEW}:${salt}:${hash}`;
+}
+
+function generateInitialPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  return Array.from(crypto.randomBytes(12), (byte) => chars[byte % chars.length]).join("");
+}
+
+function publicUsers(list) {
+  return list.map(({ id, role, seeded, passwordHash, mustChangePassword }) => ({
+    id,
+    role: role || "user",
+    seeded: !!seeded,
+    hasPassword: !!passwordHash,
+    mustChangePassword: !!mustChangePassword
+  }));
+}
+
+function userPayload(session) {
+  return {
+    id: session.label,
+    role: session.role || "user",
+    mustChangePassword: !!session.mustChangePassword
+  };
+}
+
+function findUserForSession(session) {
+  if (!session?.accessIdHash) return null;
+  return users.find((user) => hashAccessId(user.id) === session.accessIdHash) || null;
+}
+
+function updateSessionRecord(sessionId, patch) {
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  const updated = { ...session, ...patch };
+  sessions.set(sessionId, updated);
+  return updated;
+}
+
+function rotateUserSession(res, oldSession, accessId) {
+  sessions.delete(oldSession.sessionId);
+  return setSession(res, accessId);
+}
+
+function isPasswordChangeRateLimited(sessionId) {
+  return isRateLimited(passwordChangeAttempts, sessionId, passwordMaxAttempts, authWindowMs);
+}
+
+function recordFailedPasswordChange(sessionId) {
+  recordFailedAttempt(passwordChangeAttempts, sessionId, authWindowMs);
+}
+
+function verifyUserCredentials(accessId, password) {
+  const normalized = normalizeId(accessId);
+  const user = normalized ? users.find((entry) => idsEqual(entry.id, normalized)) : null;
+  const hashToCheck = user?.passwordHash || DUMMY_PASSWORD_HASH;
+  const ok = verifyStoredPassword(String(password || ""), hashToCheck);
+  return ok && !!user?.passwordHash;
 }
 
 function verifyAdminCredentials(email, password) {
@@ -182,10 +284,12 @@ function getSession(req) {
 function setSession(res, accessId) {
   const sessionId = crypto.randomBytes(32).toString("base64url");
   const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  const user = users.find((entry) => idsEqual(entry.id, accessId));
   sessions.set(sessionId, {
     accessIdHash: hashAccessId(accessId),
     label: maskAccessId(accessId),
     role: "user",
+    mustChangePassword: !!user?.mustChangePassword,
     expiresAt
   });
   res.setHeader(
@@ -257,7 +361,8 @@ function recordFailedAttempt(bucket, key, windowMs) {
 function json(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store, no-cache",
+    "Pragma": "no-cache"
   });
   res.end(JSON.stringify(payload));
 }
@@ -301,7 +406,9 @@ function securityHeaders(res) {
 
 function serveStatic(req, res) {
   const requestPath = new URL(req.url, `http://${req.headers.host}`).pathname;
-  const safePath = requestPath === "/" ? "/index.html" : requestPath;
+  let safePath = requestPath;
+  if (safePath === "/") safePath = "/index.html";
+  else if (safePath.endsWith("/")) safePath = `${safePath}index.html`;
   const filePath = path.normalize(path.join(__dirname, safePath));
   const relative = path.relative(__dirname, filePath);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -334,10 +441,9 @@ function serveStatic(req, res) {
 
 function buildRealtimeInstructions() {
   return [
-    "You are LinguaLive, a realtime Japanese-English interpreter.",
-    "Automatically detect whether the speaker is using Japanese or English.",
-    "If the speaker uses Japanese, translate into natural English.",
-    "If the speaker uses English, translate into natural Japanese.",
+    "You are AMALINK Translation, a realtime multilingual interpreter.",
+    "Automatically detect which language the speaker is using.",
+    "Translate their speech into another language suited for live interpretation.",
     "When the speaker switches language, adapt immediately without asking or commenting.",
     "Speak only the translation. Do not add explanations, labels, or meta commentary.",
     "Keep translations natural, concise, and faithful. Preserve names, numbers, and technical terms."
@@ -402,12 +508,7 @@ async function routeApi(req, res) {
       json(res, 401, { error: "Not authenticated" });
       return;
     }
-    json(res, 200, {
-      user: {
-        id: session.label,
-        role: session.role || "user"
-      }
-    });
+    json(res, 200, { user: userPayload(session) });
     return;
   }
 
@@ -442,19 +543,72 @@ async function routeApi(req, res) {
       return;
     }
 
-    const { accessId } = await readJson(req);
-    if (!isAllowedAccessId(accessId)) {
+    const { accessId, password } = await readJson(req);
+    if (!verifyUserCredentials(accessId, password)) {
       recordFailedAttempt(loginAttempts, ip, authWindowMs);
-      json(res, 401, { error: "このアクセスIDではログインできません。" });
+      json(res, 401, { error: "アクセスIDまたはパスワードが正しくありません。" });
       return;
     }
 
     const session = setSession(res, accessId);
+    json(res, 200, { user: userPayload(session) });
+    return;
+  }
+
+  if (url.pathname === "/api/password" && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "user") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+    if (isPasswordChangeRateLimited(session.sessionId)) {
+      json(res, 429, { error: "試行回数が多すぎます。時間を置いて再試行してください。" });
+      return;
+    }
+
+    const { currentPassword, newPassword } = await readJson(req);
+    const current = String(currentPassword || "");
+    const next = String(newPassword || "");
+    if (!current || !next) {
+      json(res, 400, { error: "現在のパスワードと新しいパスワードを入力してください。" });
+      return;
+    }
+    const passwordError = validateNewPassword(next, { current });
+    if (passwordError) {
+      json(res, 400, { error: passwordError });
+      return;
+    }
+
+    const user = findUserForSession(session);
+    if (!user?.passwordHash) {
+      json(res, 404, { error: "ユーザーが見つかりません。" });
+      return;
+    }
+    if (!verifyStoredPassword(current, user.passwordHash)) {
+      recordFailedPasswordChange(session.sessionId);
+      json(res, 401, { error: "現在のパスワードが正しくありません。" });
+      return;
+    }
+
+    const index = users.findIndex((entry) => idsEqual(entry.id, user.id));
+    if (index < 0) {
+      json(res, 404, { error: "ユーザーが見つかりません。" });
+      return;
+    }
+    users[index] = {
+      ...users[index],
+      passwordHash: createPasswordHash(next),
+      mustChangePassword: false
+    };
+
+    const rotated = rotateUserSession(res, session, user.id);
     json(res, 200, {
-      user: {
-        id: session.label,
-        role: session.role
-      }
+      ok: true,
+      user: userPayload(rotated)
     });
     return;
   }
@@ -469,7 +623,7 @@ async function routeApi(req, res) {
       json(res, 403, { error: "Forbidden" });
       return;
     }
-    json(res, 200, { users: sortUsers(users) });
+    json(res, 200, { users: publicUsers(sortUsers(users)) });
     return;
   }
 
@@ -484,7 +638,7 @@ async function routeApi(req, res) {
       return;
     }
 
-    const { id } = await readJson(req);
+    const { id, password } = await readJson(req);
     const normalizedId = normalizeId(id);
     if (!normalizedId || normalizedId.length > 128) {
       json(res, 400, { error: "IDが無効です" });
@@ -494,9 +648,21 @@ async function routeApi(req, res) {
       json(res, 409, { error: "そのIDはすでに存在します" });
       return;
     }
-    users.push({ id: normalizedId, role: "user", seeded: false });
+    let plainPassword = String(password || "").trim();
+    if (!plainPassword) plainPassword = generateInitialPassword();
+    if (plainPassword.length < 8) {
+      json(res, 400, { error: "パスワードは8文字以上必要です" });
+      return;
+    }
+    users.push({
+      id: normalizedId,
+      role: "user",
+      seeded: false,
+      passwordHash: createPasswordHash(plainPassword),
+      mustChangePassword: true
+    });
     allowedPlainIds.add(normalizedId);
-    json(res, 200, { ok: true, users: sortUsers(users) });
+    json(res, 200, { ok: true, users: publicUsers(sortUsers(users)), initialPassword: plainPassword });
     return;
   }
 
@@ -524,7 +690,7 @@ async function routeApi(req, res) {
     }
     users.splice(index, 1);
     allowedPlainIds.delete(targetId);
-    json(res, 200, { ok: true, users: sortUsers(users) });
+    json(res, 200, { ok: true, users: publicUsers(sortUsers(users)) });
     return;
   }
 
@@ -540,6 +706,10 @@ async function routeApi(req, res) {
     const session = getSession(req);
     if (!session) {
       json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if (session.mustChangePassword) {
+      json(res, 403, { error: "パスワードを変更してから翻訳を開始してください。" });
       return;
     }
 
@@ -567,7 +737,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`LinguaLive running on http://localhost:${port}`);
+  console.log(`AMALINK Translation running on http://localhost:${port}`);
   if (!allowedPlainIds.size && !allowedIdHashes.size) {
     console.warn("No ALLOWED_LOGIN_IDS or ALLOWED_LOGIN_ID_HASHES configured. Login will reject everyone.");
   }

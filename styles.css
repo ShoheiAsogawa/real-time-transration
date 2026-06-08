@@ -130,6 +130,12 @@ h1 {
   line-height: 1.15;
 }
 
+h1 .brand-accent,
+.nav-title span {
+  color: var(--blue);
+  font-weight: 700;
+}
+
 .auth-subtitle {
   font-size: 0.9375rem;
   color: var(--ink-tertiary);
@@ -847,6 +853,110 @@ h1 {
   font-weight: 600;
   cursor: pointer;
   border-top: 0.5px solid var(--separator);
+}
+
+.settings-link {
+  margin: 0.75rem 1rem 0;
+  padding: 0.6rem;
+  border: none;
+  background: none;
+  color: var(--blue);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  width: calc(100% - 2rem);
+}
+
+/* ── Password change dialog ── */
+
+.password-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+
+.password-overlay.is-hidden {
+  display: none;
+}
+
+.password-dialog {
+  width: min(100%, 22rem);
+  padding: 1.5rem;
+  border-radius: 1.25rem;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.password-dialog h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.password-dialog-desc {
+  margin: 0 0 1rem;
+  color: var(--ink-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.password-change-form .form-row {
+  margin-bottom: 0.85rem;
+}
+
+.password-change-form label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.password-change-form input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--separator);
+  border-radius: 0.65rem;
+  font-size: 1rem;
+  background: var(--bg-elevated);
+  color: var(--ink);
+}
+
+.password-dialog-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.password-dialog-actions .app-button {
+  flex: 1;
+}
+
+.password-logout-link {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  border: none;
+  background: none;
+  color: var(--pink);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.app-button.secondary {
+  background: var(--fill);
+  color: var(--ink);
+  border: 1px solid var(--separator);
 }
 
 /* ── Toast ── */

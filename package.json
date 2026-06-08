@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check script.js && node --check functions/api/[[path]].js",
+    "check": "node --check server.js && node --check script.js && node --check admin/admin.js && node --check functions/api/[[path]].js",
     "cf:dev": "npx wrangler pages dev . --kv=SESSION_KV",
     "cf:deploy": "npx wrangler pages deploy .",
     "hash-id": "node -e \"const crypto=require('crypto'); const id=process.argv[1]; if(!id) throw new Error('Usage: npm run hash-id -- <ACCESS_ID>'); console.log(crypto.createHash('sha256').update(id).digest('hex'))\"",

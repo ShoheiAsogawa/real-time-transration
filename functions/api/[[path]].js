@@ -1,6 +1,9 @@
 const SESSION_COOKIE = "ll_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const USERS_KV_KEY = "users:config";
+const PBKDF2_ITERATIONS_NEW = 210000;
+const DUMMY_PASSWORD_HASH =
+  "100000:00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000";
 
 function normalizeId(value) {
       return String(value || "").trim();
@@ -34,19 +37,47 @@ function normalizeEmail(value) {
       return String(value || "").trim().toLowerCase();
 }
 
-async function hashPassword(password, salt) {
+async function hashPassword(password, salt, iterations = 100000) {
       const key = await crypto.subtle.importKey("raw", textBytes(password), "PBKDF2", false, ["deriveBits"]);
       const bits = await crypto.subtle.deriveBits(
               {
                         name: "PBKDF2",
                         salt: textBytes(salt),
-                        iterations: 100000,
+                        iterations,
                         hash: "SHA-256"
               },
               key,
               256
             );
       return hex(bits);
+}
+
+function passwordPepper(env) {
+      return String(env.PASSWORD_PEPPER || env.SESSION_SECRET || "").trim();
+}
+
+function applyPasswordPepper(password, pepper) {
+      if (!pepper) return password;
+      return `${pepper}:${password}`;
+}
+
+async function verifyStoredPassword(password, storedHash, env) {
+      const pepper = passwordPepper(env);
+      if (pepper) {
+              if (await verifyPassword(applyPasswordPepper(password, pepper), storedHash)) return true;
+      }
+      return verifyPassword(password, storedHash);
+}
+
+function validateNewPassword(password, { current } = {}) {
+      const value = String(password || "");
+      if (!value || value.trim() !== value || value.includes("\0")) {
+              return "パスワードが無効です。";
+      }
+      if (value.length < 8) return "新しいパスワードは8文字以上必要です。";
+      if (value.length > 128) return "新しいパスワードが長すぎます。";
+      if (current && value === current) return "新しいパスワードは現在のパスワードと異なる必要があります。";
+      return null;
 }
 
 function parsePasswordHash(storedHash) {
@@ -133,21 +164,116 @@ function idsMatch(storedId, candidate) {
 
 function buildSeedUsers(env) {
       const envIds = envList(env, "ALLOWED_LOGIN_IDS");
+      const seedHash = seedPasswordHash(env);
       return envIds.map((id) => ({
               id: normalizeId(id),
               role: "user",
-              seeded: true
+              seeded: true,
+              passwordHash: seedHash
       })).filter((user) => user.id);
 }
 
-function normalizeUserRecord(user, envIds) {
+function normalizeUserRecord(user, envIds, seedHash) {
       const id = normalizeId(user?.id);
       if (!id) return null;
+      const seeded = envIds.some((envId) => idsMatch(envId, id));
+      let passwordHash = String(user?.passwordHash || "").trim();
+      if (!passwordHash && seeded && seedHash) passwordHash = seedHash;
       return {
               id,
               role: "user",
-              seeded: envIds.some((envId) => idsMatch(envId, id))
+              seeded,
+              passwordHash,
+              mustChangePassword: !!user?.mustChangePassword
       };
+}
+
+function seedPasswordHash(env) {
+      return String(env.SEED_USER_PASSWORD_HASH || "").trim();
+}
+
+function publicUsers(users) {
+      return users.map(({ id, role, seeded, passwordHash, mustChangePassword }) => ({
+              id,
+              role: role || "user",
+              seeded: !!seeded,
+              hasPassword: !!passwordHash,
+              mustChangePassword: !!mustChangePassword
+      }));
+}
+
+function userPayload(session) {
+      return {
+              id: session.label,
+              role: session.role || "user",
+              mustChangePassword: !!session.mustChangePassword
+      };
+}
+
+async function findUserForSession(env, session) {
+      if (!session?.accessIdHash) return null;
+      const users = await getUsers(env);
+      for (const user of users) {
+              if (await sha256(user.id) === session.accessIdHash) return user;
+      }
+      return null;
+}
+
+async function updateSessionRecord(env, sessionId, patch) {
+      const kv = requireKv(env);
+      const session = await kv.get(`session:${sessionId}`, "json");
+      if (!session) return null;
+      const updated = { ...session, ...patch };
+      await kv.put(`session:${sessionId}`, JSON.stringify(updated), {
+              expirationTtl: SESSION_TTL_SECONDS
+      });
+      return updated;
+}
+
+async function rotateUserSession(request, env, oldSession, accessId) {
+      await requireKv(env).delete(`session:${oldSession.sessionId}`);
+      return setSession(request, env, accessId);
+}
+
+async function isPasswordChangeRateLimited(env, sessionId) {
+      const windowMs = Number(env.AUTH_WINDOW_MS || 15 * 60 * 1000);
+      const maxAttempts = Number(env.PASSWORD_MAX_ATTEMPTS || 5);
+      const bucketKey = `pwd-fail:${sessionId}:${Math.floor(Date.now() / windowMs)}`;
+      const current = Number((await requireKv(env).get(bucketKey)) || 0);
+      return current >= maxAttempts;
+}
+
+async function recordFailedPasswordChange(env, sessionId) {
+      const windowMs = Number(env.AUTH_WINDOW_MS || 15 * 60 * 1000);
+      const bucketKey = `pwd-fail:${sessionId}:${Math.floor(Date.now() / windowMs)}`;
+      const kv = requireKv(env);
+      const current = Number((await kv.get(bucketKey)) || 0) + 1;
+      await kv.put(bucketKey, String(current), {
+              expirationTtl: Math.max(60, Math.ceil(windowMs / 1000))
+      });
+}
+
+async function createPasswordHash(password, env) {
+      const pepper = passwordPepper(env);
+      const material = applyPasswordPepper(String(password || ""), pepper);
+      const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+      const hash = await hashPassword(material, salt, PBKDF2_ITERATIONS_NEW);
+      return `${PBKDF2_ITERATIONS_NEW}:${salt}:${hash}`;
+}
+
+function generateInitialPassword() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+      const bytes = crypto.getRandomValues(new Uint8Array(12));
+      return Array.from(bytes, (byte) => chars[byte % chars.length]).join("");
+}
+
+async function verifyUserCredentials(env, accessId, password) {
+      const normalized = normalizeId(accessId);
+      const users = await getUsers(env);
+      const user = normalized ? users.find((u) => idsMatch(u.id, normalized)) : null;
+      const hashToCheck = user?.passwordHash || DUMMY_PASSWORD_HASH;
+      const ok = await verifyStoredPassword(String(password || ""), hashToCheck, env);
+      return ok && !!user?.passwordHash;
 }
 
 function sortUsers(users) {
@@ -167,19 +293,24 @@ function dedupeUsers(users) {
 async function getUsers(env) {
       const kv = requireKv(env);
       const envIds = envList(env, "ALLOWED_LOGIN_IDS").map((id) => normalizeId(id)).filter(Boolean);
+      const seedHash = seedPasswordHash(env);
       const stored = await kv.get(USERS_KV_KEY, "json");
 
       let users = Array.isArray(stored)
               ? stored
-                      .map((user) => normalizeUserRecord(user, envIds))
+                      .map((user) => normalizeUserRecord(user, envIds, seedHash))
                       .filter(Boolean)
               : buildSeedUsers(env);
 
       let changed = !Array.isArray(stored);
 
       for (const id of envIds) {
-              if (!users.some((user) => idsMatch(user.id, id))) {
-                        users.push({ id, role: "user", seeded: true });
+              const existing = users.find((user) => idsMatch(user.id, id));
+              if (!existing) {
+                        users.push({ id, role: "user", seeded: true, passwordHash: seedHash });
+                        changed = true;
+              } else if (!existing.passwordHash && seedHash) {
+                        existing.passwordHash = seedHash;
                         changed = true;
               }
       }
@@ -197,19 +328,6 @@ async function getUsers(env) {
 
 async function saveUsers(env, users) {
       await requireKv(env).put(USERS_KV_KEY, JSON.stringify(users));
-}
-
-async function isAllowedAccessId(env, accessId) {
-      const normalized = normalizeId(accessId);
-      if (!normalized || normalized.length > 128) return false;
-
-      // wrangler.toml の ALLOWED_LOGIN_IDS は常に許可（KV 未同期でもログイン可能）
-      if (envList(env, "ALLOWED_LOGIN_IDS").some((id) => idsMatch(id, normalized))) {
-              return true;
-      }
-
-      const users = await getUsers(env);
-      return users.some((user) => idsMatch(user.id, normalized));
 }
 
 function maskAccessId(accessId) {
@@ -241,7 +359,8 @@ function json(payload, status = 200, headers = {}) {
               status,
               headers: {
                         "Content-Type": "application/json; charset=utf-8",
-                        "Cache-Control": "no-store",
+                        "Cache-Control": "no-store, no-cache",
+                        "Pragma": "no-cache",
                         ...headers
               }
       });
@@ -295,11 +414,14 @@ async function getSession(request, env) {
 }
 
 async function setSession(request, env, accessId) {
+      const users = await getUsers(env);
+      const user = users.find((entry) => idsMatch(entry.id, accessId));
       const sessionId = randomId();
       const session = {
               accessIdHash: await sha256(accessId),
               label: maskAccessId(accessId),
               role: "user",
+              mustChangePassword: !!user?.mustChangePassword,
               createdAt: Date.now()
       };
       await requireKv(env).put(`session:${sessionId}`, JSON.stringify(session), {
@@ -348,10 +470,9 @@ async function recordFailedAuthAttempt(request, env) {
 
 function buildRealtimeInstructions() {
       return [
-              "You are LinguaLive, a realtime Japanese-English interpreter.",
-              "Automatically detect whether the speaker is using Japanese or English.",
-              "If the speaker uses Japanese, translate into natural English.",
-              "If the speaker uses English, translate into natural Japanese.",
+              "You are AMALINK Translation, a realtime multilingual interpreter.",
+              "Automatically detect which language the speaker is using.",
+              "Translate their speech into another language suited for live interpretation.",
               "When the speaker switches language, adapt immediately without asking or commenting.",
               "Speak only the translation. Do not add explanations, labels, or meta commentary.",
               "Keep translations natural, concise, and faithful. Preserve names, numbers, and technical terms."
@@ -401,7 +522,7 @@ async function routeApi(request, env) {
   if (url.pathname === "/api/me" && request.method === "GET") {
           const session = await getSession(request, env);
           if (!session) return json({ error: "Not authenticated" }, 401);
-          return json({ user: { id: session.label, role: session.role || "user" } });
+          return json({ user: userPayload(session) });
   }
 
   // /api/login
@@ -409,13 +530,54 @@ async function routeApi(request, env) {
           if (await isAuthRateLimited(request, env)) {
                     return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
           }
-          const { accessId } = await readJson(request);
-          if (!(await isAllowedAccessId(env, accessId))) {
+          const { accessId, password } = await readJson(request);
+          if (!(await verifyUserCredentials(env, accessId, password))) {
                     await recordFailedAuthAttempt(request, env);
-                    return json({ error: "このアクセスIDではログインできません。" }, 401);
+                    return json({ error: "アクセスIDまたはパスワードが正しくありません。" }, 401);
           }
           const { session, cookie } = await setSession(request, env, accessId);
-          return json({ user: { id: session.label, role: session.role } }, 200, { "Set-Cookie": cookie });
+          return json({ user: userPayload(session) }, 200, { "Set-Cookie": cookie });
+  }
+
+  // POST /api/password  パスワード変更（KV のハッシュを更新）
+  if (url.pathname === "/api/password" && request.method === "POST") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          if ((session.role || "user") !== "user") return json({ error: "Forbidden" }, 403);
+          if (await isPasswordChangeRateLimited(env, session.sessionId)) {
+                    return json({ error: "試行回数が多すぎます。時間を置いて再試行してください。" }, 429);
+          }
+
+          const { currentPassword, newPassword } = await readJson(request);
+          const current = String(currentPassword || "");
+          const next = String(newPassword || "");
+          if (!current || !next) return json({ error: "現在のパスワードと新しいパスワードを入力してください。" }, 400);
+          const passwordError = validateNewPassword(next, { current });
+          if (passwordError) return json({ error: passwordError }, 400);
+
+          const user = await findUserForSession(env, session);
+          if (!user?.passwordHash) return json({ error: "ユーザーが見つかりません。" }, 404);
+          if (!(await verifyStoredPassword(current, user.passwordHash, env))) {
+                    await recordFailedPasswordChange(env, session.sessionId);
+                    return json({ error: "現在のパスワードが正しくありません。" }, 401);
+          }
+
+          const users = await getUsers(env);
+          const index = users.findIndex((entry) => idsMatch(entry.id, user.id));
+          if (index < 0) return json({ error: "ユーザーが見つかりません。" }, 404);
+          users[index] = {
+                    ...users[index],
+                    passwordHash: await createPasswordHash(next, env),
+                    mustChangePassword: false
+          };
+          await saveUsers(env, users);
+
+          const rotated = await rotateUserSession(request, env, session, user.id);
+          return json(
+                    { ok: true, user: userPayload(rotated.session) },
+                    200,
+                    { "Set-Cookie": rotated.cookie }
+          );
   }
 
   // /api/admin/login
@@ -444,6 +606,9 @@ async function routeApi(request, env) {
   if (url.pathname === "/api/realtime-token" && request.method === "POST") {
           const session = await getSession(request, env);
           if (!session) return json({ error: "Not authenticated" }, 401);
+          if (session.mustChangePassword) {
+                    return json({ error: "パスワードを変更してから翻訳を開始してください。" }, 403);
+          }
           await readJson(request);
           const clientSecret = await createRealtimeClientSecret(env);
           return json({ clientSecret });
@@ -457,7 +622,7 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
           const users = await getUsers(env);
-          return json({ users });
+          return json({ users: publicUsers(users) });
   }
 
   // POST /api/admin/users  ユーザー追加
@@ -466,19 +631,26 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
 
-        const { id } = await readJson(request);
+        const { id, password } = await readJson(request);
           const normalizedId = normalizeId(id);
           if (!normalizedId || normalizedId.length > 128) {
                     return json({ error: "IDが無効です" }, 400);
+          }
+
+        let plainPassword = String(password || "").trim();
+          if (!plainPassword) plainPassword = generateInitialPassword();
+          if (plainPassword.length < 8) {
+                    return json({ error: "パスワードは8文字以上必要です" }, 400);
           }
 
         const users = await getUsers(env);
           if (users.some((user) => idsMatch(user.id, normalizedId))) {
                     return json({ error: "そのIDはすでに存在します" }, 409);
           }
-          users.push({ id: normalizedId, role: "user", seeded: false });
+          const passwordHash = await createPasswordHash(plainPassword, env);
+          users.push({ id: normalizedId, role: "user", seeded: false, passwordHash, mustChangePassword: true });
           await saveUsers(env, users);
-          return json({ ok: true, users });
+          return json({ ok: true, users: publicUsers(users), initialPassword: plainPassword });
   }
 
   // DELETE /api/admin/users/:id  ユーザー削除
@@ -497,7 +669,7 @@ async function routeApi(request, env) {
           const filtered = users.filter((u) => !idsMatch(u.id, targetId));
           if (filtered.length === users.length) return json({ error: "ユーザーが見つかりません" }, 404);
           await saveUsers(env, filtered);
-          return json({ ok: true, users: filtered });
+          return json({ ok: true, users: publicUsers(filtered) });
   }
 
   return json({ error: "Not found" }, 404);
