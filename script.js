@@ -12,7 +12,7 @@ const defaultSettings = {
 
 let memoryDeviceId = "";
 const settings = loadSettings();
-applyTheme();
+
 
 const state = {
       pc: null, dc: null, stream: null, user: null,
@@ -89,6 +89,7 @@ const livePill = document.querySelector("#livePill");
 const pushToTalkToggle = document.querySelector("#pushToTalkToggle");
 const darkModeToggle = document.querySelector("#darkModeToggle");
 const themeColorMeta = document.querySelector("#themeColorMeta");
+applyTheme();
 
 /* ───────── Settings / Device ───────── */
 
@@ -111,7 +112,7 @@ function normalizeSettings(value) {
 function applyTheme() {
       const theme = settings.darkMode ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", theme);
-      if (themeColorMeta) themeColorMeta.content = settings.darkMode ? "#111111" : "#ffffff";
+        const _tcm = document.querySelector("#themeColorMeta"); if (_tcm) _tcm.content = settings.darkMode ? "#111111" : "#ffffff";
 }
 
 function saveSettings() {
