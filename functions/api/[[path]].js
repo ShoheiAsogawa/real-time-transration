@@ -233,7 +233,7 @@ async function updateSessionRecord(env, sessionId, patch) {
 
 async function rotateUserSession(request, env, oldSession, accessId) {
       await requireKv(env).delete(`session:${oldSession.sessionId}`);
-      return setSession(request, env, accessId);
+      return setSession(request, env, accessId, oldSession.deviceId);
 }
 
 async function isPasswordChangeRateLimited(env, sessionId) {
@@ -402,6 +402,45 @@ function requireKv(env) {
       return env.SESSION_KV;
 }
 
+function getDeviceId(request) {
+      return String(request.headers.get("X-Device-Id") || "").trim();
+}
+
+function isValidDeviceId(deviceId) {
+      const value = String(deviceId || "").trim();
+      return value.length >= 8 && value.length <= 128;
+}
+
+async function getUserDeviceBinding(env, accessIdHash) {
+      return requireKv(env).get(`user-device:${accessIdHash}`, "json");
+}
+
+async function bindUserDevice(env, accessIdHash, deviceId, sessionId) {
+      const kv = requireKv(env);
+      const existing = await getUserDeviceBinding(env, accessIdHash);
+      if (existing?.sessionId && existing.sessionId !== sessionId) {
+              await kv.delete(`session:${existing.sessionId}`);
+      }
+      await kv.put(`user-device:${accessIdHash}`, JSON.stringify({ deviceId, sessionId }), {
+              expirationTtl: SESSION_TTL_SECONDS
+      });
+}
+
+async function clearUserDeviceBinding(env, accessIdHash, sessionId) {
+      const existing = await getUserDeviceBinding(env, accessIdHash);
+      if (existing?.sessionId === sessionId) {
+              await requireKv(env).delete(`user-device:${accessIdHash}`);
+      }
+}
+
+async function revokeUserDeviceBinding(env, accessId) {
+      const accessIdHash = await sha256(accessId);
+      const existing = await getUserDeviceBinding(env, accessIdHash);
+      const kv = requireKv(env);
+      if (existing?.sessionId) await kv.delete(`session:${existing.sessionId}`);
+      await kv.delete(`user-device:${accessIdHash}`);
+}
+
 async function getSession(request, env) {
       const cookie = parseCookies(request)[SESSION_COOKIE];
       if (!cookie) return null;
@@ -409,25 +448,47 @@ async function getSession(request, env) {
       if (!sessionId || !signature) return null;
       const expected = await sign(sessionId, env.SESSION_SECRET || "dev-insecure-session-secret");
       if (!constantTimeEqual(signature, expected)) return null;
-      const session = await requireKv(env).get(`session:${sessionId}`, "json");
+      const kv = requireKv(env);
+      const session = await kv.get(`session:${sessionId}`, "json");
       if (!session) return null;
+      if ((session.role || "user") === "user") {
+              if (!(await findUserForSession(env, session))) return null;
+              const deviceId = getDeviceId(request);
+              if (session.deviceId) {
+                      if (!deviceId || deviceId !== session.deviceId) return null;
+                      const binding = await getUserDeviceBinding(env, session.accessIdHash);
+                      if (binding && (binding.sessionId !== sessionId || binding.deviceId !== deviceId)) return null;
+                      if (!binding && session.accessIdHash) await bindUserDevice(env, session.accessIdHash, deviceId, sessionId);
+              } else if (deviceId && session.accessIdHash) {
+                      session.deviceId = deviceId;
+                      await kv.put(`session:${sessionId}`, JSON.stringify(session), {
+                                expirationTtl: SESSION_TTL_SECONDS
+                      });
+                      await bindUserDevice(env, session.accessIdHash, deviceId, sessionId);
+              }
+      }
       return { sessionId, ...session };
 }
 
-async function setSession(request, env, accessId) {
+async function setSession(request, env, accessId, deviceId) {
       const users = await getUsers(env);
       const user = users.find((entry) => idsMatch(entry.id, accessId));
       const sessionId = randomId();
+      const accessIdHash = await sha256(accessId);
       const session = {
-              accessIdHash: await sha256(accessId),
+              accessIdHash,
               label: maskAccessId(accessId),
               role: "user",
               mustChangePassword: !!user?.mustChangePassword,
+              deviceId: deviceId || null,
               createdAt: Date.now()
       };
       await requireKv(env).put(`session:${sessionId}`, JSON.stringify(session), {
               expirationTtl: SESSION_TTL_SECONDS
       });
+      if (deviceId && accessIdHash) {
+              await bindUserDevice(env, accessIdHash, deviceId, sessionId);
+      }
       return {
               session,
               cookie: sessionCookie(request, `${sessionId}.${await sign(sessionId, env.SESSION_SECRET || "dev-insecure-session-secret")}`)
@@ -531,12 +592,15 @@ async function routeApi(request, env) {
           if (await isAuthRateLimited(request, env)) {
                     return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
           }
-          const { accessId, password } = await readJson(request);
+          const { accessId, password, deviceId } = await readJson(request);
+          if (!isValidDeviceId(deviceId)) {
+                    return json({ error: "端末情報が無効です。" }, 400);
+          }
           if (!(await verifyUserCredentials(env, accessId, password))) {
                     await recordFailedAuthAttempt(request, env);
                     return json({ error: "アクセスIDまたはパスワードが正しくありません。" }, 401);
           }
-          const { session, cookie } = await setSession(request, env, accessId);
+          const { session, cookie } = await setSession(request, env, accessId, String(deviceId).trim());
           return json({ user: userPayload(session) }, 200, { "Set-Cookie": cookie });
   }
 
@@ -599,7 +663,10 @@ async function routeApi(request, env) {
   // /api/logout
   if (url.pathname === "/api/logout" && request.method === "POST") {
           const session = await getSession(request, env);
-          if (session) await requireKv(env).delete(`session:${session.sessionId}`);
+          if (session) {
+                    if (session.accessIdHash) await clearUserDeviceBinding(env, session.accessIdHash, session.sessionId);
+                    await requireKv(env).delete(`session:${session.sessionId}`);
+          }
           return json({ ok: true }, 200, { "Set-Cookie": clearSessionCookie() });
   }
 
@@ -669,6 +736,8 @@ async function routeApi(request, env) {
         const users = await getUsers(env);
           const filtered = users.filter((u) => !idsMatch(u.id, targetId));
           if (filtered.length === users.length) return json({ error: "ユーザーが見つかりません" }, 404);
+          const removed = users.find((u) => idsMatch(u.id, targetId));
+          if (removed) await revokeUserDeviceBinding(env, removed.id);
           await saveUsers(env, filtered);
           return json({ ok: true, users: publicUsers(filtered) });
   }

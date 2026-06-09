@@ -2,7 +2,7 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <title>AMALINK Translation</title>
@@ -127,21 +127,77 @@
           <button class="history-banner-btn" id="resumeLiveBtn" type="button">新しい翻訳を開始</button>
         </div>
 
-        <div class="chat-list" id="chatList" aria-live="polite"></div>
+        <div class="mic-bar mic-bar-partner" id="partnerMicBar">
+          <p class="mic-hint" id="partnerMicHint">マイクボタンをタップして話してください</p>
+          <button class="mic-fab" id="partnerMicButton" type="button" aria-pressed="false" aria-describedby="partnerMicHint">
+            <span class="mic-fab-rings" aria-hidden="true">
+              <span class="mic-ring"></span>
+              <span class="mic-ring"></span>
+              <span class="mic-ring"></span>
+            </span>
+            <span class="mic-fab-core">
+              <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+                <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
+                <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="mic-level" id="partnerMicLevel" aria-hidden="true"></span>
+          </button>
+        </div>
 
-        <div class="mic-dock">
+        <div class="dual-panel" id="dualPanel" aria-live="polite">
+          <section class="panel panel-partner" id="partnerPanel">
+            <header class="panel-header">
+              <span class="panel-badge panel-badge-partner">相手向け</span>
+              <span class="panel-lang" id="partnerLangLabel">English</span>
+            </header>
+            <div class="panel-body">
+              <p class="panel-text" id="partnerText">
+                <span class="panel-placeholder">向かい合った相手が見て聞く言葉がここに表示されます</span>
+              </p>
+            </div>
+          </section>
+
+          <section class="panel panel-self" id="selfPanel">
+            <header class="panel-header">
+              <span class="panel-badge panel-badge-self">自分向け</span>
+              <span class="panel-lang" id="selfLangLabel">日本語</span>
+            </header>
+            <div class="panel-body">
+              <p class="panel-text" id="selfText">
+                <span class="panel-placeholder">自分が見て聞く言葉がここに表示されます</span>
+              </p>
+            </div>
+          </section>
+        </div>
+
+        <div class="chat-list is-hidden" id="chatList" aria-live="polite"></div>
+
+        <div class="mic-bar mic-bar-self" id="micBar">
           <p class="mic-hint" id="micHint">マイクボタンをタップして話してください</p>
           <button class="mic-fab" id="micButton" type="button" aria-pressed="false" aria-describedby="micHint">
-            <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
-              <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
-              <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-            <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
-              <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
-            </svg>
-            <span class="visually-hidden" id="micLabel">タップして開始</span>
+            <span class="mic-fab-rings" aria-hidden="true">
+              <span class="mic-ring"></span>
+              <span class="mic-ring"></span>
+              <span class="mic-ring"></span>
+            </span>
+            <span class="mic-fab-core">
+              <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+                <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
+                <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="mic-level" id="micLevel" aria-hidden="true"></span>
           </button>
+          <span class="visually-hidden" id="micLabel">タップして開始</span>
         </div>
 
         <audio id="remoteAudio" autoplay playsinline></audio>
@@ -165,6 +221,21 @@
           新しい会話
         </button>
         <div class="session-list" id="sessionList"></div>
+        <section class="drawer-settings" aria-label="翻訳設定">
+          <h4 class="drawer-settings-title">翻訳設定</h4>
+          <label class="setting-row">
+            <span class="setting-label">長押しで話す（PTT）</span>
+            <input class="setting-toggle" id="pushToTalkToggle" type="checkbox" />
+          </label>
+          <div class="setting-row setting-row-select">
+            <label class="setting-label" for="langSelfSelect">自分向け（下）</label>
+            <select class="setting-select" id="langSelfSelect"></select>
+          </div>
+          <div class="setting-row setting-row-select">
+            <label class="setting-label" for="langPartnerSelect">相手向け（上）</label>
+            <select class="setting-select" id="langPartnerSelect"></select>
+          </div>
+        </section>
         <button class="settings-link" id="changePasswordBtn" type="button">パスワードを変更</button>
         <button class="logout-link" id="logoutButton" type="button">ログアウト</button>
       </aside>

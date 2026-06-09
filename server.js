@@ -28,6 +28,7 @@ const authWindowMs = Number(process.env.AUTH_WINDOW_MS || 15 * 60 * 1000);
 const authMaxAttempts = Number(process.env.AUTH_MAX_ATTEMPTS || 8);
 
 const sessions = new Map();
+const userDeviceBindings = new Map();
 const loginAttempts = new Map();
 const allowedPlainIds = new Set(
   (process.env.ALLOWED_LOGIN_IDS || "")
@@ -172,8 +173,9 @@ function updateSessionRecord(sessionId, patch) {
 }
 
 function rotateUserSession(res, oldSession, accessId) {
+  const deviceId = oldSession.deviceId;
   sessions.delete(oldSession.sessionId);
-  return setSession(res, accessId);
+  return setSession(res, accessId, deviceId);
 }
 
 function isPasswordChangeRateLimited(sessionId) {
@@ -265,6 +267,37 @@ function parseCookies(req) {
   );
 }
 
+function getDeviceId(req) {
+  return String(req.headers["x-device-id"] || "").trim();
+}
+
+function isValidDeviceId(deviceId) {
+  const value = String(deviceId || "").trim();
+  return value.length >= 8 && value.length <= 128;
+}
+
+function bindUserDevice(accessIdHash, deviceId, sessionId) {
+  const existing = userDeviceBindings.get(accessIdHash);
+  if (existing?.sessionId && existing.sessionId !== sessionId) {
+    sessions.delete(existing.sessionId);
+  }
+  userDeviceBindings.set(accessIdHash, { deviceId, sessionId });
+}
+
+function clearUserDeviceBinding(accessIdHash, sessionId) {
+  const existing = userDeviceBindings.get(accessIdHash);
+  if (existing?.sessionId === sessionId) {
+    userDeviceBindings.delete(accessIdHash);
+  }
+}
+
+function revokeUserDeviceBinding(accessId) {
+  const accessIdHash = hashAccessId(accessId);
+  const existing = userDeviceBindings.get(accessIdHash);
+  if (existing?.sessionId) sessions.delete(existing.sessionId);
+  userDeviceBindings.delete(accessIdHash);
+}
+
 function getSession(req) {
   const cookie = parseCookies(req).ll_session;
   if (!cookie) return null;
@@ -278,20 +311,39 @@ function getSession(req) {
     sessions.delete(sessionId);
     return null;
   }
+  if ((session.role || "user") === "user") {
+    if (!findUserForSession(session)) return null;
+    const deviceId = getDeviceId(req);
+    if (session.deviceId) {
+      if (!deviceId || !idsEqual(session.deviceId, deviceId)) return null;
+      const binding = userDeviceBindings.get(session.accessIdHash);
+      if (binding && (binding.sessionId !== sessionId || !idsEqual(binding.deviceId, deviceId))) return null;
+      if (!binding && session.accessIdHash) bindUserDevice(session.accessIdHash, deviceId, sessionId);
+    } else if (deviceId && session.accessIdHash) {
+      session.deviceId = deviceId;
+      sessions.set(sessionId, session);
+      bindUserDevice(session.accessIdHash, deviceId, sessionId);
+    }
+  }
   return { sessionId, ...session };
 }
 
-function setSession(res, accessId) {
+function setSession(res, accessId, deviceId) {
   const sessionId = crypto.randomBytes(32).toString("base64url");
   const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
   const user = users.find((entry) => idsEqual(entry.id, accessId));
+  const accessIdHash = hashAccessId(accessId);
   sessions.set(sessionId, {
-    accessIdHash: hashAccessId(accessId),
+    accessIdHash,
     label: maskAccessId(accessId),
     role: "user",
     mustChangePassword: !!user?.mustChangePassword,
+    deviceId: deviceId || null,
     expiresAt
   });
+  if (deviceId && accessIdHash) {
+    bindUserDevice(accessIdHash, deviceId, sessionId);
+  }
   res.setHeader(
     "Set-Cookie",
     `ll_session=${encodeURIComponent(createCookie(sessionId))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`
@@ -543,14 +595,18 @@ async function routeApi(req, res) {
       return;
     }
 
-    const { accessId, password } = await readJson(req);
+    const { accessId, password, deviceId } = await readJson(req);
+    if (!isValidDeviceId(deviceId)) {
+      json(res, 400, { error: "端末情報が無効です。" });
+      return;
+    }
     if (!verifyUserCredentials(accessId, password)) {
       recordFailedAttempt(loginAttempts, ip, authWindowMs);
       json(res, 401, { error: "アクセスIDまたはパスワードが正しくありません。" });
       return;
     }
 
-    const session = setSession(res, accessId);
+    const session = setSession(res, accessId, String(deviceId).trim());
     json(res, 200, { user: userPayload(session) });
     return;
   }
@@ -688,6 +744,7 @@ async function routeApi(req, res) {
       json(res, 403, { error: "環境設定で定義されたIDは削除できません。" });
       return;
     }
+    revokeUserDeviceBinding(users[index].id);
     users.splice(index, 1);
     allowedPlainIds.delete(targetId);
     json(res, 200, { ok: true, users: publicUsers(sortUsers(users)) });
@@ -696,7 +753,10 @@ async function routeApi(req, res) {
 
   if (url.pathname === "/api/logout" && req.method === "POST") {
     const session = getSession(req);
-    if (session) sessions.delete(session.sessionId);
+    if (session) {
+      if (session.accessIdHash) clearUserDeviceBinding(session.accessIdHash, session.sessionId);
+      sessions.delete(session.sessionId);
+    }
     clearSession(res);
     json(res, 200, { ok: true });
     return;

@@ -1,11 +1,33 @@
 const HISTORY_KEY = "lingualive_history_v2";
+const SETTINGS_KEY = "lingualive_settings_v1";
+const DEVICE_ID_KEY = "ll_device_id";
+
+const LANGUAGES = [
+      { code: "ja", label: "日本語" },
+      { code: "en", label: "English" },
+      { code: "zh", label: "中文" },
+      { code: "ko", label: "한국어" },
+      { code: "es", label: "Español" },
+      { code: "fr", label: "Français" }
+];
+
+const defaultSettings = {
+      pushToTalk: false,
+      langSelf: "ja",
+      langPartner: "en"
+};
+
+let memoryDeviceId = "";
+const settings = loadSettings();
 
 const state = {
       pc: null, dc: null, stream: null, user: null,
       turns: [], activeTurn: null,
       sessionId: null, sessionStartedAt: null,
       viewingHistory: false,
-      passwordGateForced: false
+      passwordGateForced: false,
+      micAnalyser: null, micLevelRaf: null,
+      pttActive: false, pttStarting: false
 };
 
 // DOM refs
@@ -30,9 +52,23 @@ const passwordChangeMessage = document.querySelector("#passwordChangeMessage");
 const passwordCancelBtn = document.querySelector("#passwordCancelBtn");
 const passwordSubmitBtn = document.querySelector("#passwordSubmitBtn");
 const passwordLogoutBtn = document.querySelector("#passwordLogoutBtn");
-const micButton = document.querySelector("#micButton");
-const micHint = document.querySelector("#micHint");
 const micLabel = document.querySelector("#micLabel");
+
+function getMicButtons() {
+      return document.querySelectorAll(".mic-fab");
+}
+
+function getMicHints() {
+      return document.querySelectorAll(".mic-hint");
+}
+
+function getMicLevels() {
+      return document.querySelectorAll(".mic-level");
+}
+
+function forEachMicButton(fn) {
+      getMicButtons().forEach(fn);
+}
 const historyBanner = document.querySelector("#historyBanner");
 const resumeLiveBtn = document.querySelector("#resumeLiveBtn");
 const connectionState = document.querySelector("#connectionState");
@@ -45,13 +81,95 @@ const drawerClose = document.querySelector("#drawerClose");
 const newConversationButton = document.querySelector("#newConversationButton");
 const sessionList = document.querySelector("#sessionList");
 const toast = document.querySelector("#toast");
+const dualPanel = document.querySelector("#dualPanel");
+const partnerText = document.querySelector("#partnerText");
+const selfText = document.querySelector("#selfText");
+const partnerLangLabel = document.querySelector("#partnerLangLabel");
+const selfLangLabel = document.querySelector("#selfLangLabel");
+const livePill = document.querySelector("#livePill");
+const pushToTalkToggle = document.querySelector("#pushToTalkToggle");
+const langSelfSelect = document.querySelector("#langSelfSelect");
+const langPartnerSelect = document.querySelector("#langPartnerSelect");
+
+/* ───────── Settings / Device ───────── */
+
+function loadSettings() {
+      try {
+              const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+              return normalizeSettings({ ...defaultSettings, ...(stored || {}) });
+      } catch {
+              return { ...defaultSettings };
+      }
+}
+
+function normalizeSettings(value) {
+      const validCodes = new Set(LANGUAGES.map((entry) => entry.code));
+      const normalized = { ...defaultSettings, ...(value || {}) };
+      if (!validCodes.has(normalized.langSelf)) normalized.langSelf = defaultSettings.langSelf;
+      if (!validCodes.has(normalized.langPartner)) normalized.langPartner = defaultSettings.langPartner;
+      if (normalized.langSelf === normalized.langPartner) normalized.langPartner = defaultSettings.langPartner;
+      if (normalized.langSelf === normalized.langPartner) normalized.langSelf = defaultSettings.langSelf;
+      normalized.pushToTalk = !!normalized.pushToTalk;
+      return normalized;
+}
+
+function saveSettings() {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+}
+
+function getDeviceId() {
+      let id = "";
+      try { id = localStorage.getItem(DEVICE_ID_KEY) || ""; } catch {}
+      if (!id) {
+              id = memoryDeviceId || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+              memoryDeviceId = id;
+              try { localStorage.setItem(DEVICE_ID_KEY, id); } catch {}
+      }
+      return id;
+}
+
+function langLabel(code) {
+      return LANGUAGES.find((entry) => entry.code === code)?.label || code;
+}
+
+function populateLanguageSelects() {
+      if (!langSelfSelect || !langPartnerSelect) return;
+      const markup = LANGUAGES.map((entry) => `<option value="${entry.code}">${entry.label}</option>`).join("");
+      langSelfSelect.innerHTML = markup;
+      langPartnerSelect.innerHTML = markup;
+      langSelfSelect.value = settings.langSelf;
+      langPartnerSelect.value = settings.langPartner;
+      if (pushToTalkToggle) pushToTalkToggle.checked = settings.pushToTalk;
+      syncLanguageLabels();
+}
+
+function syncLanguageLabels() {
+      if (selfLangLabel) selfLangLabel.textContent = langLabel(settings.langSelf);
+      if (partnerLangLabel) partnerLangLabel.textContent = langLabel(settings.langPartner);
+}
+
+function applySettingsFromUi() {
+      if (pushToTalkToggle) settings.pushToTalk = pushToTalkToggle.checked;
+      if (langSelfSelect) settings.langSelf = langSelfSelect.value;
+      if (langPartnerSelect) settings.langPartner = langPartnerSelect.value;
+      Object.assign(settings, normalizeSettings(settings));
+      populateLanguageSelects();
+      saveSettings();
+      if (state.pc) setMicEnabled(!settings.pushToTalk || state.pttActive);
+      updateLiveUi();
+      if (state.pc) sendSessionUpdate();
+}
 
 /* ───────── API ───────── */
 
 async function api(path, options = {}) {
       const response = await fetch(path, {
               credentials: "same-origin",
-              headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+              headers: {
+                        "Content-Type": "application/json",
+                        "X-Device-Id": getDeviceId(),
+                        ...(options.headers || {})
+              },
               ...options
       });
       const text = await response.text();
@@ -61,6 +179,11 @@ async function api(path, options = {}) {
               catch { throw new Error("サーバー応答の解析に失敗しました"); }
       }
       if (!response.ok) {
+              if (response.status === 401 && state.user && path !== "/api/login" && payload.error === "Not authenticated") {
+                        stopRealtime();
+                        setLoggedOut();
+                        showToast("セッションが終了しました。再ログインしてください。");
+              }
               if (response.status === 429) throw new Error(payload.error || "試行回数が多すぎます。しばらく待ってから再試行してください。");
               throw new Error(payload.error || "Request failed");
       }
@@ -70,14 +193,38 @@ async function api(path, options = {}) {
 /* ───────── 翻訳指示 ───────── */
 
 function buildInstructions() {
+      const selfLang = langLabel(settings.langSelf);
+      const partnerLang = langLabel(settings.langPartner);
       return [
-              "You are AMALINK Translation, a realtime multilingual interpreter.",
-              "Automatically detect which language the speaker is using.",
-              "Translate their speech into another language suited for live interpretation.",
-              "When the speaker switches language, adapt immediately without asking or commenting.",
+              "You are AMALINK Translation, a realtime face-to-face interpreter.",
+              "Two people face each other across a phone. The bottom side uses " + selfLang + ". The top side uses " + partnerLang + ".",
+              "When the speaker uses " + selfLang + ", translate into " + partnerLang + ".",
+              "When the speaker uses " + partnerLang + ", translate into " + selfLang + ".",
+              "Detect the spoken language automatically and switch direction immediately without commentary.",
               "Return only the translation, with no commentary, labels, or explanations.",
               "Keep the translation natural, concise, and faithful. Preserve names, numbers, and technical terms."
             ].join(" ");
+}
+
+function scoreLanguage(text, code) {
+      const value = String(text || "");
+      if (!value) return 0;
+      const kana = (value.match(/[\u3040-\u30ff]/g) || []).length;
+      const han = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+      if (code === "ja") return kana * 2 + han * 0.25;
+      if (code === "zh") return kana ? han * 0.25 : han;
+      if (code === "ko") return (value.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
+      if (code === "en") return (value.match(/[a-zA-Z]/g) || []).length;
+      if (code === "es" || code === "fr") return (value.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+      return value.length * 0.1;
+}
+
+function guessSpeakerSide(text) {
+      const selfScore = scoreLanguage(text, settings.langSelf);
+      const partnerScore = scoreLanguage(text, settings.langPartner);
+      if (partnerScore > selfScore * 1.15) return "partner";
+      if (selfScore > partnerScore * 1.15) return "self";
+      return "self";
 }
 
 /* ───────── 認証・画面切り替え ───────── */
@@ -86,6 +233,7 @@ function setAuthenticated(user) {
       state.user = user;
       authView.classList.add("is-hidden");
       translatorView.classList.remove("is-hidden");
+      populateLanguageSelects();
       renderConversation();
       renderSessionList();
       updateLiveUi();
@@ -122,6 +270,15 @@ function syncPasswordGate() {
               state.passwordGateForced = false;
               passwordOverlay?.classList.add("is-hidden");
       }
+}
+
+async function checkSessionStillValid() {
+      if (!state.user) return;
+      try {
+              const { user } = await api("/api/me");
+              if (user.role === "admin") setLoggedOut();
+              else state.user = user;
+      } catch {}
 }
 
 function setLoggedOut() {
@@ -176,7 +333,7 @@ async function handlePasswordChange(event) {
 function setStatus(text) { connectionState.textContent = text; }
 
 function setMicHint(text) {
-      if (micHint) micHint.textContent = text;
+      getMicHints().forEach((hint) => { hint.textContent = text; });
       if (micLabel) micLabel.textContent = text;
 }
 
@@ -187,8 +344,14 @@ function updateHistoryBanner() {
 
 function updateLiveUi() {
       updateHistoryBanner();
+      translatorView.classList.toggle("is-ptt", settings.pushToTalk);
       if (state.viewingHistory) {
               setMicHint("タップして新しい翻訳を開始");
+              return;
+      }
+      if (settings.pushToTalk) {
+              if (state.pc) setMicHint("押している間だけ話せます · 上部の状態をタップで終了");
+              else setMicHint("ボタンを押し続けて話してください");
               return;
       }
       if (state.pc) setMicHint("タップして翻訳を停止");
@@ -204,9 +367,14 @@ function ensureSession() {
       }
 }
 
-function startNewTurn(original = "") {
+function startNewTurn(original = "", speakerSide = null) {
       ensureSession();
-      const turn = { original, translation: "", done: false };
+      const turn = {
+              original,
+              translation: "",
+              done: false,
+              speakerSide: speakerSide || guessSpeakerSide(original)
+      };
       state.turns.push(turn);
       state.activeTurn = turn;
       return turn;
@@ -215,8 +383,11 @@ function startNewTurn(original = "") {
 function handleRealtimeEvent(event) {
       if (event.type === "conversation.item.input_audio_transcription.completed") {
               const text = (event.transcript || "").trim();
-              if (state.activeTurn && state.activeTurn.original === "") state.activeTurn.original = text;
-              else startNewTurn(text);
+              const speakerSide = guessSpeakerSide(text);
+              if (state.activeTurn && state.activeTurn.original === "") {
+                        state.activeTurn.original = text;
+                        state.activeTurn.speakerSide = speakerSide;
+              } else startNewTurn(text, speakerSide);
               renderConversation(); saveCurrentSession();
       }
       if (["response.audio_transcript.delta","response.output_audio_transcript.delta","response.text.delta","response.output_text.delta"].includes(event.type)) {
@@ -290,33 +461,76 @@ function makeBubble({ type, lang, text, placeholder, badge, withSpeaker, typing 
       return item;
 }
 
-function renderConversation() {
-      chatList.innerHTML = "";
-      if (state.turns.length === 0) {
-              const empty = document.createElement("div");
-              empty.className = "chat-empty";
-              empty.innerHTML = `
-                    <div class="chat-empty-icon">🎙️</div>
-                    <p class="chat-empty-title">リアルタイム翻訳を始めましょう</p>
-                    <ol class="chat-empty-steps">
-                      <li>下の<strong>マイクボタン</strong>をタップ</li>
-                      <li>任意の言語で話す</li>
-                      <li>翻訳が音声とテキストで表示されます</li>
-                    </ol>`;
-              chatList.appendChild(empty);
+function panelContentForTurn(turn, side) {
+      const speaker = turn.speakerSide || "self";
+      if (side === speaker) return turn.original || "";
+      return turn.translation || "";
+}
+
+function renderPanelText(el, text, { typing = false, placeholder = "" } = {}) {
+      if (!el) return;
+      el.classList.toggle("is-typing", typing);
+      el.classList.toggle("is-empty", !text && !typing);
+      if (typing) {
+              el.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
               return;
       }
-      for (const turn of state.turns) {
-              if (turn.original) chatList.appendChild(makeBubble({ type: "original", lang: "聞き取り", text: turn.original }));
-              const hasTranslation = turn.translation.length > 0;
-              if (hasTranslation || turn.original) {
-                        chatList.appendChild(makeBubble({
-                                    type: "translation", lang: "翻訳", text: turn.translation,
-                                    typing: !hasTranslation && !turn.done, badge: hasTranslation, withSpeaker: hasTranslation
-                        }));
-              }
+      if (!text) {
+              el.innerHTML = `<span class="panel-placeholder">${placeholder}</span>`;
+              return;
       }
-      chatList.scrollTop = chatList.scrollHeight;
+      el.textContent = text;
+}
+
+function renderConversation() {
+      dualPanel?.classList.toggle("is-hidden", state.viewingHistory);
+      chatList?.classList.toggle("is-hidden", !state.viewingHistory);
+
+      if (state.viewingHistory) {
+              chatList.innerHTML = "";
+              if (state.turns.length === 0) {
+                      const empty = document.createElement("div");
+                      empty.className = "chat-empty";
+                      empty.textContent = "この会話には内容がありません。";
+                      chatList.appendChild(empty);
+                      return;
+              }
+              for (const turn of state.turns) {
+                        if (turn.original) chatList.appendChild(makeBubble({ type: "original", lang: "聞き取り", text: turn.original }));
+                        const hasTranslation = turn.translation.length > 0;
+                        if (hasTranslation || turn.original) {
+                                  chatList.appendChild(makeBubble({
+                                                type: "translation", lang: "翻訳", text: turn.translation,
+                                                typing: !hasTranslation && !turn.done, badge: hasTranslation, withSpeaker: hasTranslation
+                                  }));
+                        }
+              }
+              chatList.scrollTop = chatList.scrollHeight;
+              return;
+      }
+
+      const latest = state.turns[state.turns.length - 1];
+      if (!latest) {
+              renderPanelText(partnerText, "", { placeholder: "向かい合った相手が見て聞く言葉がここに表示されます" });
+              renderPanelText(selfText, "", { placeholder: "自分が見て聞く言葉がここに表示されます" });
+              return;
+      }
+
+      const partnerContent = panelContentForTurn(latest, "partner");
+      const selfContent = panelContentForTurn(latest, "self");
+      const typingPartner = false;
+      const typingSelf = false;
+      const waitingPartner = !latest.done && latest.original && (latest.speakerSide || "self") === "self" && !latest.translation;
+      const waitingSelf = !latest.done && latest.original && (latest.speakerSide || "self") === "partner" && !latest.translation;
+
+      renderPanelText(partnerText, partnerContent, {
+              typing: typingPartner || waitingPartner,
+              placeholder: "向かい合った相手が見て聞く言葉がここに表示されます"
+      });
+      renderPanelText(selfText, selfContent, {
+              typing: typingSelf || waitingSelf,
+              placeholder: "自分が見て聞く言葉がここに表示されます"
+      });
 }
 
 /* ───────── 履歴 ───────── */
@@ -334,7 +548,7 @@ function saveCurrentSession() {
       if (!state.sessionId || meaningful.length === 0) return;
       const list = loadHistory();
       const record = { id: state.sessionId, startedAt: state.sessionStartedAt, updatedAt: Date.now(),
-                          turns: meaningful.map((t) => ({ original: t.original, translation: t.translation })) };
+                          turns: meaningful.map((t) => ({ original: t.original, translation: t.translation, speakerSide: t.speakerSide || "self" })) };
       const index = list.findIndex((s) => s.id === state.sessionId);
       if (index >= 0) list[index] = record; else list.unshift(record);
       list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -391,7 +605,12 @@ function loadSession(id) {
       saveCurrentSession();
       const session = loadHistory().find((s) => s.id === id);
       if (!session) return;
-      state.turns = session.turns.map((t) => ({ original: t.original, translation: t.translation, done: true }));
+      state.turns = session.turns.map((t) => ({
+              original: t.original,
+              translation: t.translation,
+              speakerSide: t.speakerSide || guessSpeakerSide(t.original),
+              done: true
+      }));
       state.activeTurn = null; state.sessionId = session.id;
       state.sessionStartedAt = session.startedAt; state.viewingHistory = true;
       renderConversation(); renderSessionList(); closeDrawer();
@@ -435,8 +654,48 @@ function sendSessionUpdate() {
       }));
 }
 
-async function startRealtime() {
-      if (state.pc) return;
+function setMicEnabled(enabled) {
+      if (!state.stream) return;
+      state.stream.getAudioTracks().forEach((track) => { track.enabled = enabled; });
+      forEachMicButton((button) => button.classList.toggle("is-speaking", enabled));
+      translatorView?.classList.toggle("is-transmitting", enabled);
+}
+
+function startMicLevelMonitor(stream) {
+      stopMicLevelMonitor();
+      if (!getMicLevels().length || !stream) return;
+      try {
+              const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+              if (!AudioContextCtor) return;
+              const ctx = new AudioContextCtor();
+              const source = ctx.createMediaStreamSource(stream);
+              const analyser = ctx.createAnalyser();
+              analyser.fftSize = 256;
+              source.connect(analyser);
+              state.micAnalyser = { ctx, analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+              const tick = () => {
+                      if (!state.micAnalyser) return;
+                      state.micAnalyser.analyser.getByteFrequencyData(state.micAnalyser.data);
+                      let sum = 0;
+                      for (const value of state.micAnalyser.data) sum += value;
+                      const level = Math.min(1, (sum / state.micAnalyser.data.length) / 90);
+                      getMicLevels().forEach((el) => el.style.setProperty("--mic-level", String(level)));
+                      state.micLevelRaf = requestAnimationFrame(tick);
+              };
+              state.micLevelRaf = requestAnimationFrame(tick);
+      } catch {}
+}
+
+function stopMicLevelMonitor() {
+      if (state.micLevelRaf) cancelAnimationFrame(state.micLevelRaf);
+      state.micLevelRaf = null;
+      if (state.micAnalyser?.ctx) state.micAnalyser.ctx.close().catch(() => {});
+      state.micAnalyser = null;
+      getMicLevels().forEach((el) => el.style.setProperty("--mic-level", "0"));
+}
+
+async function startRealtime({ micInitiallyEnabled = true } = {}) {
+      if (state.pc || state.pttStarting) return;
       if (state.user?.mustChangePassword) {
               openPasswordDialog(true);
               return;
@@ -447,12 +706,19 @@ async function startRealtime() {
               renderConversation();
               updateLiveUi();
       }
-      setStatus("マイク権限を確認中"); micButton.disabled = true;
+      state.pttStarting = true;
+      setStatus("マイク権限を確認中");
+      forEachMicButton((button) => { button.disabled = true; });
+      let pc = null;
+      let dc = null;
+      let stream = null;
       try {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+              stream.getAudioTracks().forEach((track) => { track.enabled = micInitiallyEnabled; });
+              startMicLevelMonitor(stream);
               const { clientSecret } = await api("/api/realtime-token", { method: "POST", body: "{}" });
-              const pc = new RTCPeerConnection();
-              const dc = pc.createDataChannel("oai-events");
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+              pc = new RTCPeerConnection();
+              dc = pc.createDataChannel("oai-events");
               stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
               pc.ontrack = (event) => { remoteAudio.srcObject = event.streams[0]; };
               pc.onconnectionstatechange = () => {
@@ -473,9 +739,13 @@ async function startRealtime() {
               await pc.setRemoteDescription({ type: "answer", sdp: await answer.text() });
               state.pc = pc; state.dc = dc; state.stream = stream;
               translatorView.classList.add("is-live");
-              micButton.setAttribute("aria-pressed", "true");
+              forEachMicButton((button) => button.setAttribute("aria-pressed", "true"));
+              if (!micInitiallyEnabled) setMicEnabled(false);
               updateLiveUi();
       } catch (error) {
+              if (dc && state.dc !== dc) dc.close();
+              if (pc && state.pc !== pc) pc.close();
+              if (stream && state.stream !== stream) stream.getTracks().forEach((track) => track.stop());
               stopRealtime();
               if (error.message.includes("パスワードを変更")) {
                         state.user = { ...state.user, mustChangePassword: true };
@@ -483,34 +753,77 @@ async function startRealtime() {
                         return;
               }
               setStatus(error.message.includes("Permission") ? "マイク権限が必要です" : error.message);
-      } finally { micButton.disabled = false; }
+      } finally {
+              state.pttStarting = false;
+              forEachMicButton((button) => { button.disabled = false; });
+      }
 }
 
 function stopRealtime(status = "待機中") {
+      stopMicLevelMonitor();
+      state.pttActive = false;
       if (state.dc) state.dc.close();
       if (state.pc) state.pc.close();
       if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
       state.pc = null; state.dc = null; state.stream = null; state.activeTurn = null;
-      translatorView.classList.remove("is-live");
-      micButton.setAttribute("aria-pressed", "false");
+      translatorView.classList.remove("is-live", "is-transmitting");
+      forEachMicButton((button) => {
+              button.classList.remove("is-speaking", "is-pressing");
+              button.setAttribute("aria-pressed", "false");
+      });
       setStatus(status);
       updateLiveUi();
       saveCurrentSession();
 }
 
+async function handleMicToggle() {
+      if (settings.pushToTalk) return;
+      if (state.pc) stopRealtime();
+      else startRealtime();
+}
+
+async function handlePttDown(event) {
+      if (!settings.pushToTalk) return;
+      event.preventDefault();
+      const button = event.currentTarget;
+      forEachMicButton((el) => el.classList.add("is-pressing"));
+      state.pttActive = true;
+      button?.setPointerCapture?.(event.pointerId);
+      try {
+              if (!state.pc) {
+                        forEachMicButton((el) => { el.disabled = true; });
+                        await startRealtime({ micInitiallyEnabled: false });
+              }
+              setMicEnabled(state.pttActive);
+      } catch {
+              state.pttActive = false;
+              forEachMicButton((el) => el.classList.remove("is-pressing"));
+      } finally {
+              forEachMicButton((el) => { el.disabled = false; });
+              state.pttStarting = false;
+      }
+}
+
+function handlePttUp() {
+      if (!settings.pushToTalk) return;
+      state.pttActive = false;
+      forEachMicButton((button) => button.classList.remove("is-pressing"));
+      if (state.pc) setMicEnabled(false);
+}
+
 function resumeLiveTranslation() {
       if (state.pc) stopRealtime();
       resetConversation();
-      startRealtime();
+      if (!settings.pushToTalk) startRealtime();
 }
 
 /* ───────── 起動・イベント ───────── */
 
 async function boot() {
+      populateLanguageSelects();
       try {
               const { user } = await api("/api/me");
               if (user.role === "admin") {
-                        // 管理セッションはユーザー画面では使わない（/admin/ へ飛ばさない）
                         setLoggedOut();
                         return;
               }
@@ -548,7 +861,8 @@ async function handleLogin() {
                         method: "POST",
                         body: JSON.stringify({
                                   accessId: accessIdInput.value.trim(),
-                                  password: accessPasswordInput.value
+                                  password: accessPasswordInput.value,
+                                  deviceId: getDeviceId()
                         })
               });
               accessIdInput.value = "";
@@ -590,7 +904,30 @@ passwordChangeForm?.addEventListener("submit", handlePasswordChange);
 passwordCancelBtn?.addEventListener("click", closePasswordDialog);
 passwordLogoutBtn?.addEventListener("click", handleLogout);
 
-micButton.addEventListener("click", () => { if (state.pc) stopRealtime(); else startRealtime(); });
+forEachMicButton((button) => {
+      button.addEventListener("click", (event) => {
+              if (settings.pushToTalk) {
+                        event.preventDefault();
+                        return;
+              }
+              handleMicToggle();
+      });
+      button.addEventListener("pointerdown", handlePttDown);
+      button.addEventListener("pointerup", handlePttUp);
+      button.addEventListener("pointerleave", handlePttUp);
+      button.addEventListener("pointercancel", handlePttUp);
+      button.addEventListener("contextmenu", (event) => event.preventDefault());
+});
+window.addEventListener("pointerup", handlePttUp);
+window.addEventListener("pointercancel", handlePttUp);
+
+livePill?.addEventListener("click", () => {
+      if (state.pc) stopRealtime();
+});
+
+pushToTalkToggle?.addEventListener("change", applySettingsFromUi);
+langSelfSelect?.addEventListener("change", applySettingsFromUi);
+langPartnerSelect?.addEventListener("change", applySettingsFromUi);
 
 if (resumeLiveBtn) resumeLiveBtn.addEventListener("click", resumeLiveTranslation);
 
@@ -609,5 +946,9 @@ window.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("beforeunload", saveCurrentSession);
+window.addEventListener("visibilitychange", () => {
+      if (!document.hidden) checkSessionStillValid();
+});
+setInterval(checkSessionStillValid, 10000);
 
 boot();
