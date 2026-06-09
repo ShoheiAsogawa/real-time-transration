@@ -11,7 +11,7 @@ loadDotEnv(path.join(__dirname, ".env"));
 const port = Number(process.env.PORT || 3000);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const passwordPepperValue = String(process.env.PASSWORD_PEPPER || sessionSecret || "").trim();
-const PBKDF2_ITERATIONS_NEW = 210000;
+const PBKDF2_ITERATIONS_NEW = 100000;
 const DUMMY_PASSWORD_HASH =
   "100000:00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000";
 const passwordMaxAttempts = Number(process.env.PASSWORD_MAX_ATTEMPTS || 5);
