@@ -21,7 +21,7 @@ ADMIN_EMAIL = "admin@lingualive.local"
 
 # 管理者パスワードハッシュ（npm run hash-password -- <PASSWORD>）
 # 本番では wrangler secret put ADMIN_PASSWORD_HASH で上書きすること
-ADMIN_PASSWORD_HASH = "100000:5249adba9d8262a7ece249fc646bcd88:03f60ebcef08a074621d70a9548d13fa41668b9b104222c35f221d0b742d91f0"
+ADMIN_PASSWORD_HASH = "100000:44ca2153394a3d3249790347b31c8bf5:3c3015f1475d1c4068dae93d0d2d0b8bb9ea912c42735086f64a46240545e856"
 
 # ── 本番 secrets（wrangler secret put で設定） ───────────────────────────────
 # SESSION_SECRET   … セッションCookie署名用ランダム文字列（32バイト以上）
