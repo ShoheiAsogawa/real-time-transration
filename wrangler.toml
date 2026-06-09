@@ -7,6 +7,11 @@ binding = "SESSION_KV"
 id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 preview_id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "lingualive-b2b-usage"
+database_id = "00000000-0000-0000-0000-000000000000"
+
 [vars]
 # ── シードユーザー（一般ユーザー） ──────────────────────────────────────────
 # カンマ区切りでログインを許可するアクセスID（管理画面で削除不可）

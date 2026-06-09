@@ -16,6 +16,33 @@
   display: none !important;
 }
 
+.dash-muted {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--ink-tertiary);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.dash-account-panel {
+  grid-column: 1 / -1;
+}
+
+.dash-account-table td {
+  vertical-align: top;
+}
+
+.dash-privacy-note {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid rgba(0, 122, 255, 0.24);
+  border-radius: 0.5rem;
+  background: rgba(0, 122, 255, 0.08);
+  color: var(--ink-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
 /* Login */
 
 .dash-login {

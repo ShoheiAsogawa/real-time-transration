@@ -18,6 +18,9 @@ const state = {
       pc: null, dc: null, stream: null, user: null,
       turns: [], activeTurn: null,
       sessionId: null, sessionStartedAt: null,
+      translationSessionId: null,
+      usageHeartbeatTimer: null,
+      maxSessionTimer: null,
       viewingHistory: false,
       passwordGateForced: false,
       micAnalyser: null, micLevelRaf: null,
@@ -115,13 +118,22 @@ function saveSettings() {
       try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
 }
 
+function isValidClientDeviceId(deviceId) {
+      const value = String(deviceId || "").trim();
+      return value.length >= 8 && value.length <= 128;
+}
+
 function getDeviceId() {
       let id = "";
       try { id = localStorage.getItem(DEVICE_ID_KEY) || ""; } catch {}
-      if (!id) {
-              id = memoryDeviceId || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-              memoryDeviceId = id;
+      if (!isValidClientDeviceId(id)) {
+              if (!isValidClientDeviceId(memoryDeviceId)) {
+                        memoryDeviceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+              }
+              id = memoryDeviceId;
               try { localStorage.setItem(DEVICE_ID_KEY, id); } catch {}
+      } else {
+              memoryDeviceId = id;
       }
       return id;
 }
@@ -166,11 +178,12 @@ async function api(path, options = {}) {
       if (!response.ok) {
               if (response.status === 401 && state.user && path !== "/api/login" && payload.error === "Not authenticated") {
                         stopRealtime();
-                        setLoggedOut();
-                        showToast("セッションが終了しました。再ログインしてください。");
+                        const sessionMessage = "セッションが終了しました。再ログインしてください。";
+                        setLoggedOut(sessionMessage);
+                        showToast(sessionMessage);
               }
               if (response.status === 429) throw new Error(payload.error || "試行回数が多すぎます。しばらく待ってから再試行してください。");
-              throw new Error(payload.error || "Request failed");
+              throw new Error(payload.error || "リクエストに失敗しました。もう一度お試しください。");
       }
       return payload;
 }
@@ -264,21 +277,23 @@ async function checkSessionStillValid() {
       if (!state.user) return;
       try {
               const { user } = await api("/api/me");
-              if (user.role === "admin") setLoggedOut();
+              if (user.role === "admin") setLoggedOut("管理者セッションです。一般ユーザーとして再ログインしてください。");
               else state.user = user;
-      } catch {}
+      } catch {
+              if (state.user) setLoggedOut("セッションが無効です。再ログインしてください。");
+      }
 }
 
-function setLoggedOut() {
+function setLoggedOut(message = "") {
       state.user = null;
       state.passwordGateForced = false;
       passwordOverlay?.classList.add("is-hidden");
       closeDrawer();
       authView.classList.remove("is-hidden");
       translatorView.classList.add("is-hidden");
-      authMessage.textContent = "";
+      authMessage.textContent = message;
       accessPasswordInput.value = "";
-      accessIdInput.focus();
+      accessIdInput?.focus();
 }
 
 async function handlePasswordChange(event) {
@@ -684,6 +699,54 @@ function stopMicLevelMonitor() {
       getMicLevels().forEach((el) => el.style.setProperty("--mic-level", "0"));
 }
 
+async function startUsageSession() {
+      const usage = await api("/api/translation-sessions/start", { method: "POST", body: "{}" });
+      state.translationSessionId = usage.sessionId;
+      clearUsageTimers();
+      state.usageHeartbeatTimer = setInterval(sendUsageHeartbeat, 30000);
+      if (usage.maxSessionSeconds) {
+              state.maxSessionTimer = setTimeout(() => {
+                        if (state.pc) stopRealtime("Session limit reached");
+              }, Math.max(1, Number(usage.maxSessionSeconds)) * 1000);
+      }
+      return usage;
+}
+
+async function sendUsageHeartbeat() {
+      const sessionId = state.translationSessionId;
+      if (!sessionId) return;
+      try {
+              const usage = await api(`/api/translation-sessions/${encodeURIComponent(sessionId)}/heartbeat`, {
+                        method: "POST",
+                        body: "{}"
+              });
+              if (usage.shouldStop && state.pc) stopRealtime(usage.stopReason || "Usage limit reached");
+      } catch (error) {
+              if (state.pc) {
+                        showToast(error.message);
+                        stopRealtime(error.message);
+              }
+      }
+}
+
+function clearUsageTimers() {
+      if (state.usageHeartbeatTimer) clearInterval(state.usageHeartbeatTimer);
+      if (state.maxSessionTimer) clearTimeout(state.maxSessionTimer);
+      state.usageHeartbeatTimer = null;
+      state.maxSessionTimer = null;
+}
+
+function endUsageSession(reason = "client_end") {
+      const sessionId = state.translationSessionId;
+      state.translationSessionId = null;
+      clearUsageTimers();
+      if (!sessionId) return;
+      api(`/api/translation-sessions/${encodeURIComponent(sessionId)}/end`, {
+              method: "POST",
+              body: JSON.stringify({ reason })
+      }).catch(() => {});
+}
+
 async function startRealtime({ micInitiallyEnabled = true } = {}) {
       if (state.pc || state.pttStarting) return;
       if (state.user?.mustChangePassword) {
@@ -703,10 +766,14 @@ async function startRealtime({ micInitiallyEnabled = true } = {}) {
       let dc = null;
       let stream = null;
       try {
+              const usageSession = await startUsageSession();
               stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
               stream.getAudioTracks().forEach((track) => { track.enabled = micInitiallyEnabled; });
               startMicLevelMonitor(stream);
-              const { clientSecret } = await api("/api/realtime-token", { method: "POST", body: "{}" });
+              const { clientSecret } = await api("/api/realtime-token", {
+                        method: "POST",
+                        body: JSON.stringify({ sessionId: usageSession.sessionId })
+              });
               pc = new RTCPeerConnection();
               dc = pc.createDataChannel("oai-events");
               stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
@@ -750,6 +817,7 @@ async function startRealtime({ micInitiallyEnabled = true } = {}) {
 }
 
 function stopRealtime(status = "待機中") {
+      endUsageSession(status);
       stopMicLevelMonitor();
       state.pttActive = false;
       if (state.dc) state.dc.close();
@@ -813,13 +881,14 @@ async function boot() {
       populateSettingsUi();
       try {
               const { user } = await api("/api/me");
+              if (state.user) return;
               if (user.role === "admin") {
                         setLoggedOut();
                         return;
               }
               setAuthenticated(user);
       } catch {
-              setLoggedOut();
+              if (!state.user) setLoggedOut();
       }
 }
 
@@ -859,7 +928,9 @@ async function handleLogin() {
               accessPasswordInput.value = "";
               setAuthenticated(user);
       } catch (error) {
-              authMessage.textContent = error.message;
+              const message = error?.message || "ログインに失敗しました。もう一度お試しください。";
+              authMessage.textContent = message;
+              showToast(message);
       } finally {
               loginSubmit.disabled = false;
               loginSubmit.textContent = "ログイン";

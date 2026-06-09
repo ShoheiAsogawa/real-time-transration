@@ -57,6 +57,22 @@ const users = [...allowedPlainIds].map((id) => ({
   seeded: true,
   passwordHash: seedUserPasswordHash
 }));
+const localPlans = {
+  free: { id: "free", name: "Free Trial", monthlyPriceJpy: 0, monthlyMinutes: 10, dailyMinutes: 3, maxSessionSeconds: 180, maxConcurrentSessions: 1 },
+  lite: { id: "lite", name: "Business Lite", monthlyPriceJpy: 9800, monthlyMinutes: 300, dailyMinutes: 30, maxSessionSeconds: 600, maxConcurrentSessions: 1 },
+  standard: { id: "standard", name: "Business Standard", monthlyPriceJpy: 29800, monthlyMinutes: 1200, dailyMinutes: 100, maxSessionSeconds: 900, maxConcurrentSessions: 2 },
+  plus: { id: "plus", name: "Business Plus", monthlyPriceJpy: 79800, monthlyMinutes: 4000, dailyMinutes: 300, maxSessionSeconds: 1200, maxConcurrentSessions: 5 }
+};
+const localAccount = {
+  id: "acct_default",
+  name: "Default Trial Account",
+  status: "active",
+  planId: "free",
+  monthlyRevenueJpy: 0,
+  costPerMinuteJpy: 6.5,
+  model: realtimeModel
+};
+const usageSessions = new Map();
 
 function loadDotEnv(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -157,6 +173,124 @@ function userPayload(session) {
     role: session.role || "user",
     mustChangePassword: !!session.mustChangePassword
   };
+}
+
+function localDayKey(timestamp = Date.now()) {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function localUsageSnapshot() {
+  closeLocalStaleSessions();
+  const plan = localPlans[localAccount.planId] || localPlans.free;
+  const today = localDayKey();
+  let monthSeconds = 0;
+  let dailySeconds = 0;
+  let estimatedCostJpy = 0;
+  let activeSessions = 0;
+  let reservedSeconds = 0;
+  for (const usage of usageSessions.values()) {
+    monthSeconds += usage.billableSeconds || 0;
+    estimatedCostJpy += usage.estimatedCostJpy || 0;
+    if (localDayKey(usage.startedAt) === today) dailySeconds += usage.billableSeconds || 0;
+    if (usage.status === "active") {
+      activeSessions += 1;
+      reservedSeconds += usage.reservedSeconds || 0;
+    }
+  }
+  const costRatio = localAccount.monthlyRevenueJpy > 0 ? estimatedCostJpy / localAccount.monthlyRevenueJpy : 0;
+  return {
+    plan,
+    monthSeconds: monthSeconds + reservedSeconds,
+    dailySeconds: dailySeconds + reservedSeconds,
+    actualMonthSeconds: monthSeconds,
+    actualDailySeconds: dailySeconds,
+    reservedSeconds,
+    adjustmentMinutes: 0,
+    estimatedCostJpy,
+    activeSessions,
+    monthlyLimitSeconds: plan.monthlyMinutes * 60,
+    dailyLimitSeconds: plan.dailyMinutes * 60,
+    costRatio
+  };
+}
+
+function closeLocalStaleSessions() {
+  const cutoff = Date.now() - 90000;
+  for (const usage of usageSessions.values()) {
+    if (usage.status === "active" && usage.lastHeartbeatAt < cutoff) {
+      usage.status = "stale_ended";
+      usage.endedAt = Date.now();
+      usage.stopReason = "stale_timeout";
+    }
+  }
+}
+
+function localQuotaFailure(snapshot) {
+  if (localAccount.status !== "active") return "account_suspended";
+  if (snapshot.monthSeconds >= snapshot.monthlyLimitSeconds) return "monthly_quota_exhausted";
+  if (snapshot.dailySeconds >= snapshot.dailyLimitSeconds) return "daily_quota_exhausted";
+  if (snapshot.activeSessions >= snapshot.plan.maxConcurrentSessions) return "concurrent_limit";
+  if (snapshot.costRatio >= 0.45) return "cost_ratio_stop";
+  return null;
+}
+
+function applyLocalUsageDelta(usage, deltaSeconds) {
+  const delta = Math.max(0, Number(deltaSeconds || 0));
+  usage.billableSeconds += delta;
+  usage.estimatedCostJpy += (delta / 60) * localAccount.costPerMinuteJpy;
+  usage.reservedSeconds = Math.max(0, Number(usage.reservedSeconds || 0) - delta);
+  usage.lastHeartbeatAt = Date.now();
+}
+
+const forbiddenContentKeys = new Set([
+  "transcript",
+  "transcription",
+  "translation",
+  "translatedText",
+  "sourceText",
+  "targetText",
+  "text",
+  "message",
+  "content",
+  "audio",
+  "audioData",
+  "conversation",
+  "transcriptText",
+  "translated_text",
+  "source_text",
+  "target_text",
+  "utterance",
+  "caption",
+  "segments",
+  "items",
+  "messages",
+  "recording",
+  "blob",
+  "media",
+  "file",
+  "mimeType"
+]);
+
+function hasForbiddenContentPayload(value) {
+  if (!value || typeof value !== "object") return false;
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenContentKeys.has(key)) return true;
+    if (hasForbiddenContentPayload(child)) return true;
+  }
+  return false;
+}
+
+function rejectContentPayload(payload) {
+  if (hasForbiddenContentPayload(payload)) {
+    throw new Error("Conversation text, translation text, and audio payloads are not accepted");
+  }
+}
+
+function requireAllowedPayload(payload, allowedKeys) {
+  rejectContentPayload(payload);
+  for (const key of Object.keys(payload || {})) {
+    if (!allowedKeys.has(key)) throw new Error(`Unsupported metadata field: ${key}`);
+  }
 }
 
 function findUserForSession(session) {
@@ -502,7 +636,7 @@ function buildRealtimeInstructions() {
   ].join(" ");
 }
 
-async function createRealtimeClientSecret() {
+async function createRealtimeClientSecret(model = realtimeModel) {
   if (!openaiApiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
@@ -518,7 +652,7 @@ async function createRealtimeClientSecret() {
     body: JSON.stringify({
       session: {
         type: "realtime",
-        model: realtimeModel,
+        model: model || realtimeModel,
         instructions,
         output_modalities: ["audio"],
         audio: {
@@ -762,6 +896,172 @@ async function routeApi(req, res) {
     return;
   }
 
+  if (url.pathname === "/api/translation-sessions/start" && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if (session.mustChangePassword) {
+      json(res, 403, { error: "password_change_required" });
+      return;
+    }
+    await readJson(req);
+    const snapshot = localUsageSnapshot();
+    const failure = localQuotaFailure(snapshot);
+    if (failure) {
+      json(res, 403, { error: failure });
+      return;
+    }
+    const reserveSeconds = 60;
+    if (snapshot.monthlyLimitSeconds - snapshot.monthSeconds < reserveSeconds) {
+      json(res, 403, { error: "monthly_quota_exhausted" });
+      return;
+    }
+    if (snapshot.dailyLimitSeconds - snapshot.dailySeconds < reserveSeconds) {
+      json(res, 403, { error: "daily_quota_exhausted" });
+      return;
+    }
+    const id = crypto.randomBytes(18).toString("base64url");
+    usageSessions.set(id, {
+      id,
+      userLabel: session.label,
+      status: "active",
+      startedAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+      reservedSeconds: reserveSeconds,
+      billableSeconds: 0,
+      estimatedCostJpy: 0,
+      model: localAccount.model
+    });
+    json(res, 200, {
+      sessionId: id,
+      remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+      dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.dailySeconds),
+      maxSessionSeconds: snapshot.plan.maxSessionSeconds,
+      model: localAccount.model
+    });
+    return;
+  }
+
+  if (url.pathname.match(/^\/api\/translation-sessions\/[^/]+\/heartbeat$/) && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    requireAllowedPayload(await readJson(req), new Set(["activeAudioSeconds", "silenceSeconds"]));
+    const id = decodeURIComponent(url.pathname.split("/")[3]);
+    const usage = usageSessions.get(id);
+    if (!usage || usage.status !== "active" || usage.userLabel !== session.label) {
+      json(res, 404, { error: "translation session is not active" });
+      return;
+    }
+    const now = Date.now();
+    applyLocalUsageDelta(usage, Math.min(30, Math.floor((now - usage.lastHeartbeatAt) / 1000)));
+    const snapshot = localUsageSnapshot();
+    const elapsedSeconds = Math.floor((now - usage.startedAt) / 1000);
+    let stopReason = null;
+    if (elapsedSeconds >= snapshot.plan.maxSessionSeconds) stopReason = "session_limit";
+    else if (snapshot.monthSeconds >= snapshot.monthlyLimitSeconds) stopReason = "monthly_quota_exhausted";
+    else if (snapshot.dailySeconds >= snapshot.dailyLimitSeconds) stopReason = "daily_quota_exhausted";
+    json(res, 200, {
+      ok: true,
+      remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+      dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.dailySeconds),
+      shouldStop: !!stopReason,
+      stopReason
+    });
+    return;
+  }
+
+  if (url.pathname.match(/^\/api\/translation-sessions\/[^/]+\/end$/) && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    const endPayload = await readJson(req);
+    requireAllowedPayload(endPayload, new Set(["reason"]));
+    const { reason } = endPayload;
+    const id = decodeURIComponent(url.pathname.split("/")[3]);
+    const usage = usageSessions.get(id);
+    if (!usage || usage.userLabel !== session.label) {
+      json(res, 404, { error: "translation session not found" });
+      return;
+    }
+    if (usage.status === "active") {
+      applyLocalUsageDelta(usage, Math.min(30, Math.floor((Date.now() - usage.lastHeartbeatAt) / 1000)));
+      usage.status = "ended";
+      usage.endedAt = Date.now();
+      usage.stopReason = String(reason || "client_end");
+    }
+    json(res, 200, {
+      ok: true,
+      billableSeconds: usage.billableSeconds,
+      estimatedCostJpy: usage.estimatedCostJpy
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/admin/accounts" && req.method === "GET") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+    const snapshot = localUsageSnapshot();
+    json(res, 200, {
+      accounts: [{
+        id: localAccount.id,
+        name: localAccount.name,
+        status: localAccount.status,
+        plan_id: localAccount.planId,
+        plan_name: snapshot.plan.name,
+        monthly_minutes: snapshot.plan.monthlyMinutes,
+        daily_minutes: snapshot.plan.dailyMinutes,
+        month_seconds: snapshot.actualMonthSeconds,
+        daily_seconds: snapshot.actualDailySeconds,
+        reserved_seconds: snapshot.reservedSeconds,
+        adjustment_minutes: snapshot.adjustmentMinutes,
+        estimated_cost_jpy: snapshot.estimatedCostJpy,
+        monthly_revenue_jpy: localAccount.monthlyRevenueJpy,
+        cost_ratio: snapshot.costRatio,
+        monthly_limit_seconds: snapshot.monthlyLimitSeconds,
+        daily_limit_seconds: snapshot.dailyLimitSeconds,
+        remaining_seconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+        daily_remaining_seconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.dailySeconds),
+        active_sessions: snapshot.activeSessions,
+        model: localAccount.model
+      }]
+    });
+    return;
+  }
+
+  if (url.pathname.match(/^\/api\/admin\/accounts\/[^/]+\/status$/) && req.method === "PATCH") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+    const { status } = await readJson(req);
+    if (!["active", "suspended"].includes(status)) {
+      json(res, 400, { error: "Invalid status" });
+      return;
+    }
+    localAccount.status = status;
+    json(res, 200, { ok: true });
+    return;
+  }
+
   if (url.pathname === "/api/realtime-token" && req.method === "POST") {
     const session = getSession(req);
     if (!session) {
@@ -773,9 +1073,25 @@ async function routeApi(req, res) {
       return;
     }
 
-    await readJson(req);
-    const clientSecret = await createRealtimeClientSecret();
-    json(res, 200, { clientSecret });
+    const { sessionId } = await readJson(req);
+    if (!sessionId) {
+      json(res, 400, { error: "translation session is required" });
+      return;
+    }
+    const usage = usageSessions.get(sessionId);
+    if (!usage || usage.status !== "active" || usage.userLabel !== session.label) {
+      json(res, 403, { error: "translation session is not active" });
+      return;
+    }
+    const snapshot = localUsageSnapshot();
+    const adjusted = { ...snapshot, activeSessions: Math.max(0, snapshot.activeSessions - 1) };
+    const failure = localQuotaFailure(adjusted);
+    if (failure) {
+      json(res, 403, { error: failure });
+      return;
+    }
+    const clientSecret = await createRealtimeClientSecret(usage.model);
+    json(res, 200, { clientSecret, model: usage.model });
     return;
   }
 
@@ -792,7 +1108,9 @@ const server = http.createServer(async (req, res) => {
     }
     serveStatic(req, res);
   } catch (error) {
-    json(res, 500, { error: error.message || "Server error" });
+    const message = error.message || "Server error";
+    const status = message === "Conversation text, translation text, and audio payloads are not accepted" ? 400 : 500;
+    json(res, status, { error: message });
   }
 });
 

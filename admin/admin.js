@@ -1,4 +1,4 @@
-const state = { users: [], admin: null };
+const state = { users: [], accounts: [], admin: null };
 
 const loginScreen = document.querySelector("#loginScreen");
 const dashboard = document.querySelector("#dashboard");
@@ -69,6 +69,7 @@ function showDashboard(user) {
   adminLabel.textContent = label;
   adminAvatar.textContent = label.charAt(0).toUpperCase() || "A";
   loadUsers();
+  loadAccounts();
 }
 
 function showLogin() {
@@ -256,6 +257,135 @@ function renderTable(users) {
 
   userTableWrap.innerHTML = "";
   userTableWrap.appendChild(table);
+}
+
+function formatMinutes(seconds) {
+  return `${Math.ceil(Number(seconds || 0) / 60)}分`;
+}
+
+function formatMoney(value) {
+  return `${Math.round(Number(value || 0)).toLocaleString("ja-JP")}円`;
+}
+
+function getAccountPanel() {
+  let panel = document.querySelector("#accountUsagePanel");
+  if (panel) return panel;
+  panel = document.createElement("section");
+  panel.className = "dash-panel dash-panel-table dash-account-panel";
+  panel.id = "accountUsagePanel";
+  panel.innerHTML = `
+    <div class="dash-panel-head">
+      <div>
+        <h2 class="dash-panel-title">B2B usage gate</h2>
+        <p class="dash-panel-desc">契約アカウント別の利用量、原価率、停止状態を確認します。</p>
+      </div>
+      <button class="dash-btn dash-btn-icon" id="refreshAccountsBtn" type="button" title="更新" aria-label="更新">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 4v6h6M20 20v-6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M20 8a8 8 0 00-14.9-3M4 16a8 8 0 0014.9 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="dash-privacy-note">
+      本文・翻訳本文・音声・文字起こし本文は保存しません。保存するのは利用分数、日時、アカウント、推定原価などの利用メタデータのみです。
+    </div>
+    <div class="dash-table-wrap" id="accountTableWrap">
+      <p class="dash-loading"><span class="admin-spinner"></span>読み込み中...</p>
+    </div>`;
+  document.querySelector(".dash-panels")?.appendChild(panel);
+  panel.querySelector("#refreshAccountsBtn")?.addEventListener("click", loadAccounts);
+  return panel;
+}
+
+function renderAccounts(accounts) {
+  state.accounts = accounts || [];
+  const wrap = getAccountPanel().querySelector("#accountTableWrap");
+  if (state.accounts.length === 0) {
+    wrap.innerHTML = `
+      <div class="dash-empty">
+        <p class="dash-empty-title">契約アカウントはまだありません</p>
+        <p class="dash-empty-desc">ユーザーが最初に翻訳を開始すると、Free Trialの既定アカウントが作成されます。</p>
+      </div>`;
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "dash-table dash-account-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Account</th>
+        <th>Plan</th>
+        <th>Usage</th>
+        <th>Cost</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>`;
+  const tbody = table.querySelector("tbody");
+  for (const account of state.accounts) {
+    const used = Number(account.month_seconds || 0);
+    const reserved = Number(account.reserved_seconds || 0);
+    const limit = Number(account.monthly_limit_seconds || Number(account.monthly_minutes || 0) * 60);
+    const dailyUsed = Number(account.daily_seconds || 0);
+    const dailyLimit = Number(account.daily_limit_seconds || Number(account.daily_minutes || 0) * 60);
+    const ratio = Number(account.cost_ratio || 0);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>
+        <strong>${account.name || account.id}</strong>
+        <span class="dash-muted">${account.id}</span>
+        ${account.industry === "pharmacy" ? '<span class="dash-muted">薬局: 本文保存OFF固定</span>' : ""}
+      </td>
+      <td>${account.plan_name || account.plan_id}</td>
+      <td>
+        ${formatMinutes(used)} / ${formatMinutes(limit)}
+        <span class="dash-muted">本日 ${formatMinutes(dailyUsed)} / ${formatMinutes(dailyLimit)}</span>
+        <span class="dash-muted">予約中 ${formatMinutes(reserved)} / 追加 ${account.adjustment_minutes || 0}分</span>
+        <span class="dash-muted">開始可能 ${formatMinutes(account.remaining_seconds || 0)} / Active ${account.active_sessions || 0}</span>
+      </td>
+      <td>${formatMoney(account.estimated_cost_jpy)}<br><span class="dash-muted">原価率 ${(ratio * 100).toFixed(1)}%</span></td>
+      <td><span class="dash-table-badge ${account.status === "active" ? "is-custom" : "is-pending"}">${account.status}</span></td>
+      <td class="dash-table-actions"></td>`;
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = account.status === "active" ? "dash-table-del" : "dash-table-copy";
+    toggleBtn.textContent = account.status === "active" ? "停止" : "再開";
+    toggleBtn.addEventListener("click", async () => {
+      const next = account.status === "active" ? "suspended" : "active";
+      try {
+        await api(`/api/admin/accounts/${encodeURIComponent(account.id)}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: next })
+        });
+        showToast(next === "active" ? "再開しました" : "停止しました");
+        loadAccounts();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+    tr.querySelector(".dash-table-actions").appendChild(toggleBtn);
+    tbody.appendChild(tr);
+  }
+  wrap.innerHTML = "";
+  wrap.appendChild(table);
+}
+
+async function loadAccounts() {
+  const panel = getAccountPanel();
+  const wrap = panel.querySelector("#accountTableWrap");
+  wrap.innerHTML = '<p class="dash-loading"><span class="admin-spinner"></span>読み込み中...</p>';
+  try {
+    const { accounts } = await api("/api/admin/accounts");
+    renderAccounts(accounts);
+  } catch (error) {
+    wrap.innerHTML = `
+      <div class="dash-empty">
+        <p class="dash-empty-title">利用状況を読み込めません</p>
+        <p class="dash-empty-desc">${error.message}</p>
+      </div>`;
+  }
 }
 
 async function loadUsers(options = {}) {

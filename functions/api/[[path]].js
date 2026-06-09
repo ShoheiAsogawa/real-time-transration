@@ -387,6 +387,57 @@ async function readJson(request) {
       }
 }
 
+const FORBIDDEN_CONTENT_KEYS = new Set([
+      "transcript",
+      "transcription",
+      "translation",
+      "translatedText",
+      "sourceText",
+      "targetText",
+      "text",
+      "message",
+      "content",
+      "audio",
+      "audioData",
+      "conversation",
+      "transcriptText",
+      "translated_text",
+      "source_text",
+      "target_text",
+      "utterance",
+      "caption",
+      "segments",
+      "items",
+      "messages",
+      "recording",
+      "blob",
+      "media",
+      "file",
+      "mimeType"
+]);
+
+function hasForbiddenContentPayload(value) {
+      if (!value || typeof value !== "object") return false;
+      for (const [key, child] of Object.entries(value)) {
+              if (FORBIDDEN_CONTENT_KEYS.has(key)) return true;
+              if (hasForbiddenContentPayload(child)) return true;
+      }
+      return false;
+}
+
+function rejectContentPayload(payload) {
+      if (hasForbiddenContentPayload(payload)) {
+              throw new Error("Conversation text, translation text, and audio payloads are not accepted");
+      }
+}
+
+function requireAllowedPayload(payload, allowedKeys) {
+      rejectContentPayload(payload);
+      for (const key of Object.keys(payload || {})) {
+              if (!allowedKeys.has(key)) throw new Error(`Unsupported metadata field: ${key}`);
+      }
+}
+
 function assertSameOrigin(request, env) {
       if (request.method === "GET" || request.method === "HEAD") return true;
       const origin = request.headers.get("Origin");
@@ -541,7 +592,218 @@ function buildRealtimeInstructions() {
             ].join(" ");
 }
 
-async function createRealtimeClientSecret(env) {
+const PLAN_SEEDS = [
+      ["free", "Free Trial", 0, 10, 3, 180, 1, 1, 0, 0],
+      ["lite", "Business Lite", 9800, 300, 30, 600, 3, 1, 25, 1],
+      ["standard", "Business Standard", 29800, 1200, 100, 900, 10, 2, 22, 1],
+      ["plus", "Business Plus", 79800, 4000, 300, 1200, 30, 5, 18, 1]
+];
+
+function requireDb(env) {
+      if (!env.DB) throw new Error("DB binding is not configured");
+      return env.DB;
+}
+
+function nowMs() {
+      return Date.now();
+}
+
+function dayKey(timestamp = nowMs()) {
+      return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function monthStartMs(timestamp = nowMs()) {
+      const date = new Date(timestamp);
+      return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+}
+
+function secondsToMinutes(seconds) {
+      return Math.ceil(Math.max(0, Number(seconds || 0)) / 60);
+}
+
+function costForSeconds(seconds, costPerMinuteJpy) {
+      return (Math.max(0, Number(seconds || 0)) / 60) * Number(costPerMinuteJpy || 6.5);
+}
+
+async function seedPlans(env) {
+      const db = requireDb(env);
+      for (const seed of PLAN_SEEDS) {
+              await db.prepare(
+                    `INSERT OR IGNORE INTO plans (
+                      id, name, monthly_price_jpy, monthly_minutes, daily_minutes,
+                      max_session_seconds, max_users, max_concurrent_sessions,
+                      overage_jpy_per_min, commercial_allowed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ).bind(...seed).run();
+      }
+}
+
+async function audit(env, actor, action, targetType, targetId, metadata = {}) {
+      await requireDb(env).prepare(
+            `INSERT INTO admin_audit_logs (id, actor, action, target_type, target_id, created_at, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(randomId(16), actor || "system", action, targetType, targetId, nowMs(), JSON.stringify(metadata)).run();
+}
+
+async function getB2bUserForSession(env, session) {
+      if (!session?.accessIdHash) return null;
+      await seedPlans(env);
+      const db = requireDb(env);
+      let row = await db.prepare(
+            `SELECT u.*, a.status AS account_status, a.plan_id, a.monthly_revenue_jpy, a.cost_per_minute_jpy,
+                    a.model, a.daily_minutes_override, a.monthly_minutes_override,
+                    p.monthly_minutes, p.daily_minutes, p.max_session_seconds, p.max_concurrent_sessions,
+                    p.monthly_price_jpy
+             FROM account_users u
+             JOIN accounts a ON a.id = u.account_id
+             JOIN plans p ON p.id = a.plan_id
+             WHERE u.access_id_hash = ?`
+      ).bind(session.accessIdHash).first();
+      if (row) return row;
+
+      const sourceUser = await findUserForSession(env, session);
+      if (!sourceUser) return null;
+      const timestamp = nowMs();
+      await db.prepare(
+            `INSERT OR IGNORE INTO accounts (
+              id, name, industry, plan_id, status, billing_mode, monthly_revenue_jpy,
+              cost_per_minute_jpy, model, history_retention_mode, created_at, updated_at
+            ) VALUES (?, ?, 'hotel_ryokan', 'free', 'active', 'invoice', 0, 6.5, ?, 'metadata_only', ?, ?)`
+      ).bind("acct_default", "Default Trial Account", env.OPENAI_REALTIME_MODEL || "gpt-realtime", timestamp, timestamp).run();
+      await db.prepare(
+            `INSERT OR IGNORE INTO locations (id, account_id, name, status, created_at, updated_at)
+             VALUES (?, 'acct_default', 'Default Location', 'active', ?, ?)`
+      ).bind("loc_default", timestamp, timestamp).run();
+      await db.prepare(
+            `INSERT OR IGNORE INTO account_users (
+              id, account_id, location_id, access_id_hash, access_id_label, role, status, created_at, updated_at
+            ) VALUES (?, 'acct_default', 'loc_default', ?, ?, 'staff', 'active', ?, ?)`
+      ).bind(`usr_${session.accessIdHash.slice(0, 16)}`, session.accessIdHash, maskAccessId(sourceUser.id), timestamp, timestamp).run();
+
+      row = await db.prepare(
+            `SELECT u.*, a.status AS account_status, a.plan_id, a.monthly_revenue_jpy, a.cost_per_minute_jpy,
+                    a.model, a.industry, a.history_retention_mode, a.daily_minutes_override, a.monthly_minutes_override,
+                    p.monthly_minutes, p.daily_minutes, p.max_session_seconds, p.max_concurrent_sessions,
+                    p.monthly_price_jpy
+             FROM account_users u
+             JOIN accounts a ON a.id = u.account_id
+             JOIN plans p ON p.id = a.plan_id
+             WHERE u.access_id_hash = ?`
+      ).bind(session.accessIdHash).first();
+      return row;
+}
+
+async function closeStaleSessions(env, accountId) {
+      const timestamp = nowMs();
+      await requireDb(env).prepare(
+            `UPDATE usage_sessions
+             SET status = 'stale_ended', ended_at = ?, stop_reason = 'stale_timeout', updated_at = ?
+             WHERE account_id = ? AND status = 'active' AND last_heartbeat_at < ?`
+      ).bind(timestamp, timestamp, accountId, timestamp - 90000).run();
+}
+
+async function quotaSnapshot(env, accountId) {
+      const db = requireDb(env);
+      const timestamp = nowMs();
+      await closeStaleSessions(env, accountId);
+      const today = dayKey(timestamp);
+      const monthStart = monthStartMs(timestamp);
+      const account = await db.prepare(
+            `SELECT a.*, p.monthly_minutes, p.daily_minutes, p.max_session_seconds, p.max_concurrent_sessions,
+                    p.monthly_price_jpy
+             FROM accounts a JOIN plans p ON p.id = a.plan_id WHERE a.id = ?`
+      ).bind(accountId).first();
+      if (!account) throw new Error("Account not found");
+
+      const monthRow = await db.prepare(
+            `SELECT COALESCE(SUM(billable_seconds), 0) AS seconds, COALESCE(SUM(estimated_cost_jpy), 0) AS cost
+             FROM usage_sessions
+             WHERE account_id = ? AND started_at >= ?`
+      ).bind(accountId, monthStart).first();
+      const dayRow = await db.prepare(
+            `SELECT COALESCE(billable_seconds, 0) AS seconds, COALESCE(estimated_cost_jpy, 0) AS cost
+             FROM usage_daily_rollups WHERE account_id = ? AND date = ?`
+      ).bind(accountId, today).first();
+      const adjustmentRow = await db.prepare(
+            `SELECT COALESCE(SUM(minutes), 0) AS minutes FROM quota_adjustments
+             WHERE account_id = ? AND created_at >= ?`
+      ).bind(accountId, monthStart).first();
+      const activeRow = await db.prepare(
+            `SELECT COUNT(*) AS count, COALESCE(SUM(reserved_seconds), 0) AS reserved_seconds
+             FROM usage_sessions WHERE account_id = ? AND status = 'active'`
+      ).bind(accountId).first();
+
+      const monthlyLimitMinutes = Number(account.monthly_minutes_override || account.monthly_minutes || 0)
+            + Number(adjustmentRow?.minutes || 0);
+      const dailyLimitMinutes = Number(account.daily_minutes_override || account.daily_minutes || 0);
+      const reservedSeconds = Number(activeRow?.reserved_seconds || 0);
+      const actualMonthSeconds = Number(monthRow?.seconds || 0);
+      const actualDaySeconds = Number(dayRow?.seconds || 0);
+      const adjustmentMinutes = Number(adjustmentRow?.minutes || 0);
+      const monthSeconds = actualMonthSeconds + reservedSeconds;
+      const daySeconds = actualDaySeconds + reservedSeconds;
+      const estimatedCostJpy = Number(monthRow?.cost || 0);
+      const revenue = Number(account.monthly_revenue_jpy || account.monthly_price_jpy || 0);
+      const costRatio = revenue > 0 ? estimatedCostJpy / revenue : 0;
+
+      return {
+              account,
+              monthSeconds,
+              daySeconds,
+              estimatedCostJpy,
+              actualMonthSeconds,
+              actualDaySeconds,
+              reservedSeconds,
+              adjustmentMinutes,
+              monthlyLimitSeconds: monthlyLimitMinutes * 60,
+              dailyLimitSeconds: dailyLimitMinutes * 60,
+              activeSessions: Number(activeRow?.count || 0),
+              costRatio
+      };
+}
+
+function quotaFailure(snapshot) {
+      if (snapshot.account.status !== "active") return "account_suspended";
+      if (snapshot.monthSeconds >= snapshot.monthlyLimitSeconds) return "monthly_quota_exhausted";
+      if (snapshot.daySeconds >= snapshot.dailyLimitSeconds) return "daily_quota_exhausted";
+      if (snapshot.activeSessions >= Number(snapshot.account.max_concurrent_sessions || 1)) return "concurrent_limit";
+      if (snapshot.costRatio >= 0.45) return "cost_ratio_stop";
+      return null;
+}
+
+async function writeUsageDelta(env, sessionRow, deltaSeconds, eventType = "heartbeat") {
+      const db = requireDb(env);
+      const delta = Math.max(0, Number(deltaSeconds || 0));
+      if (!delta) return;
+      const timestamp = nowMs();
+      const cost = costForSeconds(delta, sessionRow.cost_per_minute_jpy);
+      await db.prepare(
+            `UPDATE usage_sessions
+             SET billable_seconds = billable_seconds + ?,
+                 estimated_cost_jpy = estimated_cost_jpy + ?,
+                 reserved_seconds = CASE
+                   WHEN reserved_seconds > ? THEN reserved_seconds - ?
+                   ELSE 0
+                 END,
+                 last_heartbeat_at = ?,
+                 updated_at = ?
+             WHERE id = ?`
+      ).bind(delta, cost, delta, delta, timestamp, timestamp, sessionRow.id).run();
+      await db.prepare(
+            `INSERT INTO usage_events (id, session_id, event_type, occurred_at, delta_seconds)
+             VALUES (?, ?, ?, ?, ?)`
+      ).bind(randomId(16), sessionRow.id, eventType, timestamp, delta).run();
+      await db.prepare(
+            `INSERT INTO usage_daily_rollups (account_id, date, billable_seconds, estimated_cost_jpy, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(account_id, date) DO UPDATE SET
+               billable_seconds = billable_seconds + excluded.billable_seconds,
+               estimated_cost_jpy = estimated_cost_jpy + excluded.estimated_cost_jpy,
+               updated_at = excluded.updated_at`
+      ).bind(sessionRow.account_id, dayKey(timestamp), delta, cost, timestamp).run();
+}
+
+async function createRealtimeClientSecret(env, model) {
       if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
       const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
               method: "POST",
@@ -552,7 +814,7 @@ async function createRealtimeClientSecret(env) {
               body: JSON.stringify({
                         session: {
                                     type: "realtime",
-                                    model: env.OPENAI_REALTIME_MODEL || "gpt-realtime",
+                                    model: model || env.OPENAI_REALTIME_MODEL || "gpt-realtime",
                                     instructions: buildRealtimeInstructions(),
                                     output_modalities: ["audio"],
                                     audio: {
@@ -677,14 +939,224 @@ async function routeApi(request, env) {
           if (session.mustChangePassword) {
                     return json({ error: "パスワードを変更してから翻訳を開始してください。" }, 403);
           }
-          await readJson(request);
-          const clientSecret = await createRealtimeClientSecret(env);
-          return json({ clientSecret });
+          const { sessionId } = await readJson(request);
+          if (!sessionId) return json({ error: "translation session is required" }, 400);
+          const b2bUser = await getB2bUserForSession(env, session);
+          if (!b2bUser) return json({ error: "Account user not found" }, 404);
+          const usageSession = await requireDb(env).prepare(
+                `SELECT s.*, a.cost_per_minute_jpy, a.model
+                 FROM usage_sessions s JOIN accounts a ON a.id = s.account_id
+                 WHERE s.id = ? AND s.user_id = ? AND s.status = 'active'`
+          ).bind(sessionId, b2bUser.id).first();
+          if (!usageSession) return json({ error: "translation session is not active" }, 403);
+          const snapshot = await quotaSnapshot(env, usageSession.account_id);
+          const failure = quotaFailure({ ...snapshot, activeSessions: Math.max(0, snapshot.activeSessions - 1) });
+          if (failure) return json({ error: failure }, 403);
+          const clientSecret = await createRealtimeClientSecret(env, usageSession.model);
+          return json({ clientSecret, model: usageSession.model });
   }
 
   // ─── 管理者専用 API ───
 
   // GET /api/admin/users  ユーザー一覧取得
+  if (url.pathname === "/api/translation-sessions/start" && request.method === "POST") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          if (session.mustChangePassword) return json({ error: "password_change_required" }, 403);
+          const body = await readJson(request);
+          const b2bUser = await getB2bUserForSession(env, session);
+          if (!b2bUser) return json({ error: "Account user not found" }, 404);
+          if (b2bUser.status !== "active") return json({ error: "user_suspended" }, 403);
+          const snapshot = await quotaSnapshot(env, b2bUser.account_id);
+          const failure = quotaFailure(snapshot);
+          if (failure) return json({ error: failure }, 403);
+          const reserveSeconds = 60;
+          if (snapshot.monthlyLimitSeconds - snapshot.monthSeconds < reserveSeconds) {
+                return json({ error: "monthly_quota_exhausted" }, 403);
+          }
+          if (snapshot.dailyLimitSeconds - snapshot.daySeconds < reserveSeconds) {
+                return json({ error: "daily_quota_exhausted" }, 403);
+          }
+          const timestamp = nowMs();
+          const id = randomId(18);
+          await requireDb(env).prepare(
+                `INSERT INTO usage_sessions (
+                  id, account_id, location_id, user_id, status, model, started_at,
+                  last_heartbeat_at, reserved_seconds, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
+          ).bind(
+                id,
+                b2bUser.account_id,
+                body.locationId || b2bUser.location_id || null,
+                b2bUser.id,
+                snapshot.account.model || env.OPENAI_REALTIME_MODEL || "gpt-realtime",
+                timestamp,
+                timestamp,
+                reserveSeconds,
+                timestamp,
+                timestamp
+          ).run();
+          return json({
+                sessionId: id,
+                remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+                dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.daySeconds),
+                maxSessionSeconds: Number(snapshot.account.max_session_seconds || 180),
+                model: snapshot.account.model || env.OPENAI_REALTIME_MODEL || "gpt-realtime"
+          });
+  }
+
+  if (url.pathname.match(/^\/api\/translation-sessions\/[^/]+\/heartbeat$/) && request.method === "POST") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          const sessionId = decodeURIComponent(url.pathname.split("/")[3]);
+          const b2bUser = await getB2bUserForSession(env, session);
+          if (!b2bUser) return json({ error: "Account user not found" }, 404);
+          requireAllowedPayload(await readJson(request), new Set(["activeAudioSeconds", "silenceSeconds"]));
+          const db = requireDb(env);
+          const usageSession = await db.prepare(
+                `SELECT s.*, a.cost_per_minute_jpy, p.max_session_seconds
+                 FROM usage_sessions s
+                 JOIN accounts a ON a.id = s.account_id
+                 JOIN plans p ON p.id = a.plan_id
+                 WHERE s.id = ? AND s.user_id = ? AND s.status = 'active'`
+          ).bind(sessionId, b2bUser.id).first();
+          if (!usageSession) return json({ error: "translation session is not active" }, 404);
+          const timestamp = nowMs();
+          const delta = Math.min(30, Math.max(0, Math.floor((timestamp - Number(usageSession.last_heartbeat_at || usageSession.started_at)) / 1000)));
+          await writeUsageDelta(env, usageSession, delta);
+          const updated = await db.prepare(
+                `SELECT s.*, a.cost_per_minute_jpy, p.max_session_seconds
+                 FROM usage_sessions s
+                 JOIN accounts a ON a.id = s.account_id
+                 JOIN plans p ON p.id = a.plan_id
+                 WHERE s.id = ?`
+          ).bind(sessionId).first();
+          const snapshot = await quotaSnapshot(env, updated.account_id);
+          const elapsedSeconds = Math.floor((timestamp - Number(updated.started_at)) / 1000);
+          let stopReason = null;
+          if (elapsedSeconds >= Number(updated.max_session_seconds || 180)) stopReason = "session_limit";
+          else if (snapshot.monthSeconds >= snapshot.monthlyLimitSeconds) stopReason = "monthly_quota_exhausted";
+          else if (snapshot.daySeconds >= snapshot.dailyLimitSeconds) stopReason = "daily_quota_exhausted";
+          return json({
+                ok: true,
+                remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+                dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.daySeconds),
+                shouldStop: !!stopReason,
+                stopReason
+          });
+  }
+
+  if (url.pathname.match(/^\/api\/translation-sessions\/[^/]+\/end$/) && request.method === "POST") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          const sessionId = decodeURIComponent(url.pathname.split("/")[3]);
+          const endPayload = await readJson(request);
+          requireAllowedPayload(endPayload, new Set(["reason"]));
+          const { reason } = endPayload;
+          const b2bUser = await getB2bUserForSession(env, session);
+          if (!b2bUser) return json({ error: "Account user not found" }, 404);
+          const db = requireDb(env);
+          const usageSession = await db.prepare(
+                `SELECT s.*, a.cost_per_minute_jpy
+                 FROM usage_sessions s JOIN accounts a ON a.id = s.account_id
+                 WHERE s.id = ? AND s.user_id = ?`
+          ).bind(sessionId, b2bUser.id).first();
+          if (!usageSession) return json({ error: "translation session not found" }, 404);
+          if (usageSession.status === "active") {
+                const timestamp = nowMs();
+                const delta = Math.min(30, Math.max(0, Math.floor((timestamp - Number(usageSession.last_heartbeat_at || usageSession.started_at)) / 1000)));
+                await writeUsageDelta(env, usageSession, delta, "end");
+                await db.prepare(
+                      `UPDATE usage_sessions SET status = 'ended', ended_at = ?, stop_reason = ?, updated_at = ? WHERE id = ?`
+                ).bind(timestamp, String(reason || "client_end"), timestamp, sessionId).run();
+          }
+          const ended = await db.prepare(`SELECT billable_seconds, estimated_cost_jpy FROM usage_sessions WHERE id = ?`).bind(sessionId).first();
+          return json({
+                ok: true,
+                billableSeconds: Number(ended?.billable_seconds || 0),
+                estimatedCostJpy: Number(ended?.estimated_cost_jpy || 0)
+          });
+  }
+
+  if (url.pathname === "/api/me/usage" && request.method === "GET") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          const b2bUser = await getB2bUserForSession(env, session);
+          if (!b2bUser) return json({ error: "Account user not found" }, 404);
+          const snapshot = await quotaSnapshot(env, b2bUser.account_id);
+          return json({
+                planId: snapshot.account.plan_id,
+                monthUsedSeconds: snapshot.monthSeconds,
+                dailyUsedSeconds: snapshot.daySeconds,
+                remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+                dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.daySeconds),
+                maxSessionSeconds: Number(snapshot.account.max_session_seconds || 180)
+          });
+  }
+
+  if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
+          await seedPlans(env);
+          const rows = await requireDb(env).prepare(
+                `SELECT a.id, a.name, a.status, a.industry, a.history_retention_mode, a.plan_id,
+                        a.monthly_revenue_jpy, a.cost_per_minute_jpy, a.model,
+                        p.name AS plan_name, p.monthly_minutes, p.daily_minutes,
+                        p.max_concurrent_sessions, p.max_session_seconds
+                 FROM accounts a
+                 JOIN plans p ON p.id = a.plan_id
+                 ORDER BY a.created_at DESC`
+          ).all();
+          const accounts = [];
+          for (const row of rows.results || []) {
+                const snapshot = await quotaSnapshot(env, row.id);
+                accounts.push({
+                      ...row,
+                      month_seconds: snapshot.actualMonthSeconds,
+                      daily_seconds: snapshot.actualDaySeconds,
+                      reserved_seconds: snapshot.reservedSeconds,
+                      adjustment_minutes: snapshot.adjustmentMinutes,
+                      estimated_cost_jpy: snapshot.estimatedCostJpy,
+                      active_sessions: snapshot.activeSessions,
+                      cost_ratio: snapshot.costRatio,
+                      monthly_limit_seconds: snapshot.monthlyLimitSeconds,
+                      daily_limit_seconds: snapshot.dailyLimitSeconds,
+                      remaining_seconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
+                      daily_remaining_seconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.daySeconds)
+                });
+          }
+          return json({ accounts });
+  }
+
+  if (url.pathname.match(/^\/api\/admin\/accounts\/[^/]+\/status$/) && request.method === "PATCH") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
+          const accountId = decodeURIComponent(url.pathname.split("/")[4]);
+          const { status } = await readJson(request);
+          if (!["active", "suspended"].includes(status)) return json({ error: "Invalid status" }, 400);
+          await requireDb(env).prepare(`UPDATE accounts SET status = ?, updated_at = ? WHERE id = ?`).bind(status, nowMs(), accountId).run();
+          await audit(env, session.label, "account_status", "account", accountId, { status });
+          return json({ ok: true });
+  }
+
+  if (url.pathname.match(/^\/api\/admin\/accounts\/[^/]+\/quota-adjustments$/) && request.method === "POST") {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "Not authenticated" }, 401);
+          if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
+          const accountId = decodeURIComponent(url.pathname.split("/")[4]);
+          const { minutes, priceJpy, reason } = await readJson(request);
+          const value = Math.max(0, Number(minutes || 0));
+          if (!value) return json({ error: "minutes is required" }, 400);
+          await requireDb(env).prepare(
+                `INSERT INTO quota_adjustments (id, account_id, minutes, price_jpy, reason, created_at, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(randomId(16), accountId, value, Number(priceJpy || 0), String(reason || "manual"), nowMs(), session.label).run();
+          await audit(env, session.label, "quota_adjustment", "account", accountId, { minutes: value, priceJpy });
+          return json({ ok: true });
+  }
+
   if (url.pathname === "/api/admin/users" && request.method === "GET") {
           const session = await getSession(request, env);
           if (!session) return json({ error: "Not authenticated" }, 401);
@@ -750,7 +1222,11 @@ export async function onRequest(context) {
               return await routeApi(context.request, context.env);
       } catch (error) {
               const message = error.message || "Server error";
-              const status = message === "Invalid JSON payload" || message === "Payload too large" ? 400 : 500;
+              const status = message === "Invalid JSON payload" ||
+                    message === "Payload too large" ||
+                    message === "Conversation text, translation text, and audio payloads are not accepted"
+                    ? 400
+                    : 500;
               return json({ error: message }, status);
       }
 }
