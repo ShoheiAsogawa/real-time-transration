@@ -3,7 +3,7 @@ const SETTINGS_KEY = "lingualive_settings_v1";
 const DEVICE_ID_KEY = "ll_device_id";
 
 const SELF_LANG_LABEL = "日本語";
-const PARTNER_LANG_LABEL = "自動認識";
+const PARTNER_LANG_LABEL = "相手の言語を自動判定";
 
 const defaultSettings = {
       pushToTalk: false,
@@ -91,7 +91,7 @@ const darkModeToggle = document.querySelector("#darkModeToggle");
 const themeColorMeta = document.querySelector("#themeColorMeta");
 applyTheme();
 
-/* ───────── Settings / Device ───────── */
+/* Settings / Device */
 
 function loadSettings() {
       try {
@@ -158,7 +158,30 @@ function applySettingsFromUi() {
       if (state.pc) sendSessionUpdate();
 }
 
-/* ───────── API ───────── */
+/* API */
+
+const ERROR_MESSAGES = {
+      "Not authenticated": "ログインが必要です。",
+      "Forbidden": "この操作を行う権限がありません。",
+      "Invalid origin": "このアクセス元からは利用できません。",
+      "monthly_quota_exhausted": "今月の利用上限に達したため、新しい翻訳を開始できません。",
+      "daily_quota_exhausted": "本日の利用上限に達したため、新しい翻訳を開始できません。",
+      "session_limit": "1回の翻訳時間の上限に達しました。必要に応じて新しく開始してください。",
+      "account_suspended": "このアカウントは現在停止中です。管理者にお問い合わせください。",
+      "user_suspended": "このユーザーは現在停止中です。管理者にお問い合わせください。",
+      "cost_ratio_stop": "原価率が上限を超えたため、新しい翻訳を開始できません。",
+      "concurrent_limit": "同時接続数の上限に達しています。ほかの翻訳を終了してから再度お試しください。",
+      "password_change_required": "翻訳を開始する前にパスワードを変更してください。",
+      "translation session is required": "翻訳セッションが必要です。もう一度開始してください。",
+      "translation session is not active": "翻訳セッションが終了しています。新しく開始してください。",
+      "translation session not found": "翻訳セッションが見つかりません。",
+      "Conversation text, translation text, and audio payloads are not accepted": "会話本文・翻訳本文・音声・文字起こし本文は保存できません。利用メタデータのみ送信してください。"
+};
+
+function displayErrorMessage(error) {
+      const key = String(error || "").trim();
+      return ERROR_MESSAGES[key] || key;
+}
 
 async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -174,22 +197,22 @@ async function api(path, options = {}) {
       let payload = {};
       if (text) {
               try { payload = JSON.parse(text); }
-              catch { throw new Error("サーバー応答の解析に失敗しました"); }
+              catch { throw new Error("サーバーの応答を読み取れませんでした。"); }
       }
       if (!response.ok) {
               if (response.status === 401 && state.user && path !== "/api/login" && payload.error === "Not authenticated") {
                         stopRealtime();
-                        const sessionMessage = "セッションが終了しました。再ログインしてください。";
+                        const sessionMessage = "セッションが終了しました。再度ログインしてください。";
                         setLoggedOut(sessionMessage);
                         showToast(sessionMessage);
               }
-              if (response.status === 429) throw new Error(payload.error || "試行回数が多すぎます。しばらく待ってから再試行してください。");
-              throw new Error(payload.error || "リクエストに失敗しました。もう一度お試しください。");
+              if (response.status === 429) throw new Error(displayErrorMessage(payload.error) || "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。");
+              throw new Error(displayErrorMessage(payload.error) || "リクエストに失敗しました。もう一度お試しください。");
       }
       return payload;
 }
 
-/* ───────── 翻訳指示 ───────── */
+/* Translation display helpers */
 
 function buildInstructions() {
       return [
@@ -214,7 +237,7 @@ function scoreJapanese(text) {
 function scoreNonJapanese(text) {
       const value = String(text || "");
       if (!value) return 0;
-      const latin = (value.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+      const latin = (value.match(/[a-zA-Zﾃ-ﾃｿ]/g) || []).length;
       const hangul = (value.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
       const han = (value.match(/[\u4e00-\u9fff]/g) || []).length;
       const kana = (value.match(/[\u3040-\u30ff]/g) || []).length;
@@ -229,7 +252,7 @@ function guessSpeakerSide(text) {
       return "self";
 }
 
-/* ───────── 認証・画面切り替え ───────── */
+/* Authentication / screen switching */
 
 function setAuthenticated(user) {
       state.user = user;
@@ -278,10 +301,10 @@ async function checkSessionStillValid() {
       if (!state.user) return;
       try {
               const { user } = await api("/api/me");
-              if (user.role === "admin") setLoggedOut("管理者セッションです。一般ユーザーとして再ログインしてください。");
+              if (user.role === "admin") setLoggedOut("管理者セッションです。一般ユーザーとして再度ログインしてください。");
               else state.user = user;
       } catch {
-              if (state.user) setLoggedOut("セッションが無効です。再ログインしてください。");
+              if (state.user) setLoggedOut("セッションが終了しました。再度ログインしてください。");
       }
 }
 
@@ -323,9 +346,9 @@ async function handlePasswordChange(event) {
               if (currentPasswordInput) currentPasswordInput.value = "";
               if (newPasswordInput) newPasswordInput.value = "";
               if (confirmPasswordInput) confirmPasswordInput.value = "";
-              showToast("パスワードを変更しました");
+              showToast("パスワードを変更しました。");
       } catch (error) {
-              passwordChangeMessage.textContent = error.message;
+              passwordChangeMessage.textContent = displayErrorMessage(error.message);
       } finally {
               if (passwordSubmitBtn) {
                         passwordSubmitBtn.disabled = false;
@@ -334,7 +357,7 @@ async function handlePasswordChange(event) {
       }
 }
 
-function setStatus(text) { connectionState.textContent = text; }
+function setStatus(text) { connectionState.textContent = displayErrorMessage(text); }
 
 function setMicHint(text) {
       getMicHints().forEach((hint) => { hint.textContent = text; });
@@ -350,19 +373,19 @@ function updateLiveUi() {
       updateHistoryBanner();
       translatorView.classList.toggle("is-ptt", settings.pushToTalk);
       if (state.viewingHistory) {
-              setMicHint("タップして新しい翻訳を開始");
+              setMicHint("マイクボタンを押して新しい翻訳を開始");
               return;
       }
       if (settings.pushToTalk) {
-              if (state.pc) setMicHint("押している間だけ話せます · 上部の状態をタップで終了");
+              if (state.pc) setMicHint("押している間だけ話せます。上部の状態をタップすると終了します。");
               else setMicHint("ボタンを押し続けて話してください");
               return;
       }
       if (state.pc) setMicHint("タップして翻訳を停止");
-      else setMicHint("マイクボタンをタップして話してください");
+      else setMicHint("マイクボタンを押して翻訳を開始");
 }
 
-/* ───────── 会話管理 ───────── */
+/* Conversation state */
 
 function ensureSession() {
       if (!state.sessionId) {
@@ -420,7 +443,7 @@ function resetConversation() {
       updateLiveUi();
 }
 
-/* ───────── レンダリング ───────── */
+/* Rendering */
 
 const SPEAKER_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M11 5L6 9H2v6h4l5 4V5z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 010 7M19 5a9 9 0 010 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const MIC_DOT_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
@@ -446,7 +469,7 @@ function makeBubble({ type, lang, text, placeholder, badge, withSpeaker, typing 
               speak.className = "speak-button"; speak.type = "button";
               speak.setAttribute("aria-label", "音声を再生");
               speak.innerHTML = SPEAKER_SVG;
-              speak.addEventListener("click", () => remoteAudio.play().catch(() => showToast("音声再生を許可してください")));
+              speak.addEventListener("click", () => remoteAudio.play().catch(() => showToast("音声の再生を許可してください。")));
               head.appendChild(speak);
       }
       bubble.appendChild(head);
@@ -517,8 +540,8 @@ function renderConversation() {
 
       const latest = state.turns[state.turns.length - 1];
       if (!latest) {
-              renderPanelText(partnerText, "", { placeholder: "向かい合った相手が見て聞く言葉がここに表示されます" });
-              renderPanelText(selfText, "", { placeholder: "自分が見て聞く言葉がここに表示されます" });
+              renderPanelText(partnerText, "", { placeholder: "相手が話した内容の翻訳がここに表示されます。" });
+              renderPanelText(selfText, "", { placeholder: "自分が話した内容がここに表示されます。" });
               return;
       }
 
@@ -531,15 +554,15 @@ function renderConversation() {
 
       renderPanelText(partnerText, partnerContent, {
               typing: typingPartner || waitingPartner,
-              placeholder: "向かい合った相手が見て聞く言葉がここに表示されます"
+              placeholder: "相手が話した内容の翻訳がここに表示されます。"
       });
       renderPanelText(selfText, selfContent, {
               typing: typingSelf || waitingSelf,
-              placeholder: "自分が見て聞く言葉がここに表示されます"
+              placeholder: "自分が話した内容がここに表示されます。"
       });
 }
 
-/* ───────── 履歴 ───────── */
+/* History */
 
 function loadHistory() {
       try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { return []; }
@@ -623,7 +646,7 @@ function loadSession(id) {
       updateLiveUi();
 }
 
-/* ───────── ドロワー ───────── */
+/* Drawer */
 
 function openDrawer() {
       renderSessionList(); drawerOverlay.hidden = false;
@@ -635,7 +658,7 @@ function closeDrawer() {
       setTimeout(() => { if (!drawer.classList.contains("is-open")) drawerOverlay.hidden = true; }, 320);
 }
 
-/* ───────── トースト ───────── */
+/* Toast */
 
 let toastTimer = null;
 function showToast(message) {
@@ -644,7 +667,7 @@ function showToast(message) {
       toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 1800);
 }
 
-/* ───────── リアルタイム翻訳 ───────── */
+/* Realtime translation */
 
 function sendSessionUpdate() {
       if (!state.dc || state.dc.readyState !== "open") return;
@@ -761,7 +784,7 @@ async function startRealtime({ micInitiallyEnabled = true } = {}) {
               updateLiveUi();
       }
       state.pttStarting = true;
-      setStatus("マイク権限を確認中");
+      setStatus("接続中です...");
       forEachMicButton((button) => { button.disabled = true; });
       let pc = null;
       let dc = null;
@@ -781,7 +804,9 @@ async function startRealtime({ micInitiallyEnabled = true } = {}) {
               pc.ontrack = (event) => { remoteAudio.srcObject = event.streams[0]; };
               pc.onconnectionstatechange = () => {
                         if (pc.connectionState === "connected") setStatus("翻訳中");
-                        if (["failed","closed","disconnected"].includes(pc.connectionState)) { if (state.pc === pc) stopRealtime("接続終了"); }
+                        if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
+                                  if (state.pc === pc) stopRealtime("翻訳を終了しました");
+                        }
               };
               dc.addEventListener("open", () => { sendSessionUpdate(); setStatus("翻訳中"); updateLiveUi(); });
               dc.addEventListener("message", (message) => {
@@ -805,19 +830,19 @@ async function startRealtime({ micInitiallyEnabled = true } = {}) {
               if (pc && state.pc !== pc) pc.close();
               if (stream && state.stream !== stream) stream.getTracks().forEach((track) => track.stop());
               stopRealtime();
-              if (error.message.includes("パスワードを変更")) {
+              if (error.message.includes("password_change_required") || error.message.includes("パスワードを変更")) {
                         state.user = { ...state.user, mustChangePassword: true };
                         openPasswordDialog(true);
                         return;
               }
-              setStatus(error.message.includes("Permission") ? "マイク権限が必要です" : error.message);
+              setStatus(error.message.includes("Permission") ? "マイクの使用を許可してください。" : displayErrorMessage(error.message));
       } finally {
               state.pttStarting = false;
               forEachMicButton((button) => { button.disabled = false; });
       }
 }
 
-function stopRealtime(status = "待機中") {
+function stopRealtime(status = "翻訳を終了しました") {
       endUsageSession(status);
       stopMicLevelMonitor();
       state.pttActive = false;
@@ -876,7 +901,7 @@ function resumeLiveTranslation() {
       if (!settings.pushToTalk) startRealtime();
 }
 
-/* ───────── 起動・イベント ───────── */
+/* Boot / events */
 
 async function boot() {
       populateSettingsUi();
@@ -895,20 +920,20 @@ async function boot() {
 
 async function handlePasteAccessId() {
       if (!navigator.clipboard?.readText) {
-              showToast("このブラウザでは貼り付けできません");
+              showToast("このブラウザでは貼り付けできません。");
               return;
       }
       try {
               const text = (await navigator.clipboard.readText()).trim();
               if (!text) {
-                      showToast("クリップボードが空です");
+                      showToast("クリップボードが空です。");
                       return;
               }
               accessIdInput.value = text;
               authMessage.textContent = "";
               accessIdInput.focus();
       } catch {
-              showToast("クリップボードへのアクセスが拒否されました");
+              showToast("クリップボードへのアクセスが拒否されました。");
       }
 }
 
@@ -929,7 +954,7 @@ async function handleLogin() {
               accessPasswordInput.value = "";
               setAuthenticated(user);
       } catch (error) {
-              const message = error?.message || "ログインに失敗しました。もう一度お試しください。";
+              const message = displayErrorMessage(error?.message) || "ログインに失敗しました。もう一度お試しください。";
               authMessage.textContent = message;
               showToast(message);
       } finally {
@@ -998,7 +1023,9 @@ drawerOverlay.addEventListener("click", closeDrawer);
 
 newConversationButton.addEventListener("click", () => {
       if (state.pc) stopRealtime();
-      resetConversation(); closeDrawer(); showToast("新しい会話を開始しました");
+      resetConversation();
+      closeDrawer();
+      showToast("新しい会話を開始しました。");
 });
 
 window.addEventListener("keydown", (e) => {

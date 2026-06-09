@@ -69,6 +69,8 @@ const localAccount = {
   status: "active",
   planId: "free",
   monthlyRevenueJpy: 0,
+  adjustmentMinutes: 0,
+  adjustmentRevenueJpy: 0,
   costPerMinuteJpy: 6.5,
   model: realtimeModel
 };
@@ -197,7 +199,10 @@ function localUsageSnapshot() {
       reservedSeconds += usage.reservedSeconds || 0;
     }
   }
-  const costRatio = localAccount.monthlyRevenueJpy > 0 ? estimatedCostJpy / localAccount.monthlyRevenueJpy : 0;
+  const adjustmentMinutes = Number(localAccount.adjustmentMinutes || 0);
+  const adjustmentRevenueJpy = Number(localAccount.adjustmentRevenueJpy || 0);
+  const totalRevenueJpy = Number(localAccount.monthlyRevenueJpy || 0) + adjustmentRevenueJpy;
+  const costRatio = totalRevenueJpy > 0 ? estimatedCostJpy / totalRevenueJpy : 0;
   return {
     plan,
     monthSeconds: monthSeconds + reservedSeconds,
@@ -205,10 +210,12 @@ function localUsageSnapshot() {
     actualMonthSeconds: monthSeconds,
     actualDailySeconds: dailySeconds,
     reservedSeconds,
-    adjustmentMinutes: 0,
+    adjustmentMinutes,
+    adjustmentRevenueJpy,
+    totalRevenueJpy,
     estimatedCostJpy,
     activeSessions,
-    monthlyLimitSeconds: plan.monthlyMinutes * 60,
+    monthlyLimitSeconds: (plan.monthlyMinutes + adjustmentMinutes) * 60,
     dailyLimitSeconds: plan.dailyMinutes * 60,
     costRatio
   };
@@ -282,7 +289,7 @@ function hasForbiddenContentPayload(value) {
 
 function rejectContentPayload(payload) {
   if (hasForbiddenContentPayload(payload)) {
-    throw new Error("Conversation text, translation text, and audio payloads are not accepted");
+    throw new Error("会話本文・翻訳本文・音声・文字起こし本文は保存できません。利用メタデータのみ送信してください。");
   }
 }
 
@@ -725,7 +732,7 @@ async function routeApi(req, res) {
   if (url.pathname === "/api/login" && req.method === "POST") {
     const ip = clientIp(req);
     if (isRateLimited(loginAttempts, ip, authMaxAttempts, authWindowMs)) {
-      json(res, 429, { error: "ログイン試行が多すぎます。時間を置いて再試行してください。" });
+      json(res, 429, { error: "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。" });
       return;
     }
 
@@ -744,7 +751,6 @@ async function routeApi(req, res) {
     json(res, 200, { user: userPayload(session) });
     return;
   }
-
   if (url.pathname === "/api/password" && req.method === "POST") {
     const session = getSession(req);
     if (!session) {
@@ -756,7 +762,7 @@ async function routeApi(req, res) {
       return;
     }
     if (isPasswordChangeRateLimited(session.sessionId)) {
-      json(res, 429, { error: "試行回数が多すぎます。時間を置いて再試行してください。" });
+      json(res, 429, { error: "試行回数が多すぎます。しばらく待ってから再度お試しください。" });
       return;
     }
 
@@ -831,17 +837,17 @@ async function routeApi(req, res) {
     const { id, password } = await readJson(req);
     const normalizedId = normalizeId(id);
     if (!normalizedId || normalizedId.length > 128) {
-      json(res, 400, { error: "IDが無効です" });
+      json(res, 400, { error: "IDが無効です。" });
       return;
     }
     if (users.some((user) => idsEqual(user.id, normalizedId))) {
-      json(res, 409, { error: "そのIDはすでに存在します" });
+      json(res, 409, { error: "そのIDはすでに存在します。" });
       return;
     }
     let plainPassword = String(password || "").trim();
     if (!plainPassword) plainPassword = generateInitialPassword();
     if (plainPassword.length < 8) {
-      json(res, 400, { error: "パスワードは8文字以上必要です" });
+      json(res, 400, { error: "パスワードは8文字以上必要です。" });
       return;
     }
     users.push({
@@ -1028,8 +1034,10 @@ async function routeApi(req, res) {
         daily_seconds: snapshot.actualDailySeconds,
         reserved_seconds: snapshot.reservedSeconds,
         adjustment_minutes: snapshot.adjustmentMinutes,
+        adjustment_revenue_jpy: snapshot.adjustmentRevenueJpy,
         estimated_cost_jpy: snapshot.estimatedCostJpy,
         monthly_revenue_jpy: localAccount.monthlyRevenueJpy,
+        total_revenue_jpy: snapshot.totalRevenueJpy,
         cost_ratio: snapshot.costRatio,
         monthly_limit_seconds: snapshot.monthlyLimitSeconds,
         daily_limit_seconds: snapshot.dailyLimitSeconds,
@@ -1059,6 +1067,37 @@ async function routeApi(req, res) {
     }
     localAccount.status = status;
     json(res, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname.match(/^\/api\/admin\/accounts\/[^/]+\/quota-adjustments$/) && req.method === "POST") {
+    const session = getSession(req);
+    if (!session) {
+      json(res, 401, { error: "Not authenticated" });
+      return;
+    }
+    if ((session.role || "user") !== "admin") {
+      json(res, 403, { error: "Forbidden" });
+      return;
+    }
+    const accountId = decodeURIComponent(url.pathname.split("/")[4]);
+    if (accountId !== localAccount.id) {
+      json(res, 404, { error: "Account not found" });
+      return;
+    }
+    const { minutes, priceJpy } = await readJson(req);
+    const value = Math.max(0, Number(minutes || 0));
+    if (!value) {
+      json(res, 400, { error: "minutes is required" });
+      return;
+    }
+    localAccount.adjustmentMinutes += value;
+    localAccount.adjustmentRevenueJpy += Math.max(0, Number(priceJpy || 0));
+    json(res, 200, {
+      ok: true,
+      adjustmentMinutes: localAccount.adjustmentMinutes,
+      adjustmentRevenueJpy: localAccount.adjustmentRevenueJpy
+    });
     return;
   }
 

@@ -81,7 +81,7 @@ button {
   white-space: nowrap;
 }
 
-/* ── App Shell ── */
+/* 笏笏 App Shell 笏笏 */
 
 .app-shell {
   width: 100%;
@@ -94,7 +94,7 @@ button {
   background: var(--bg);
 }
 
-/* ── Auth View ── */
+/* 笏笏 Auth View 笏笏 */
 
 .auth-view {
   position: absolute;
@@ -277,7 +277,7 @@ h1 .brand-accent,
   min-height: 1.25rem;
 }
 
-/* ── Forms ── */
+/* 笏笏 Forms 笏笏 */
 
 .form-group {
   background: var(--bg-elevated);
@@ -370,7 +370,7 @@ h1 .brand-accent,
 .app-button:active { transform: scale(0.98); opacity: 0.85; }
 .app-button.primary { background: var(--blue); color: #fff; }
 
-/* ── Translator View ── */
+/* 笏笏 Translator View 笏笏 */
 
 .translator-view {
   position: absolute;
@@ -457,7 +457,7 @@ h1 .brand-accent,
 
 .is-live .live-pill { color: var(--ink); }
 
-/* ── Dual Panel (face-to-face) ── */
+/* 笏笏 Dual Panel (face-to-face) 笏笏 */
 
 .dual-panel {
   flex: 1;
@@ -583,6 +583,15 @@ h1 .brand-accent,
   border-bottom: 1px solid var(--separator);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
+.translation-caution {
+  max-width: min(92vw, 34rem);
+  margin: 0.1rem auto 0;
+  padding: 0 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--ink-tertiary);
+}
 
 .dual-panel.is-history .mic-bar {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
@@ -590,7 +599,7 @@ h1 .brand-accent,
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.06);
 }
 
-/* ── Chat List ── */
+/* 笏笏 Chat List 笏笏 */
 
 .chat-list {
   flex: 1;
@@ -712,9 +721,9 @@ h1 .brand-accent,
   align-items: start;
 }
 
-/* 行（バブル）の高さいっぱいを使い、各ドット中心から次のドット中心まで
-   途切れず縦バーを引く。列幅 1.9rem の中心 = 0.95rem。
-   ドット中心 = 上から 0.975rem、行下端から次ドット中心まで = 余白0.85rem + 0.975rem */
+/* 陦鯉ｼ医ヰ繝悶Ν・峨・鬮倥＆縺・▲縺ｱ縺・ｒ菴ｿ縺・∝推繝峨ャ繝井ｸｭ蠢・°繧画ｬ｡縺ｮ繝峨ャ繝井ｸｭ蠢・∪縺ｧ
+   騾泌・繧後★邵ｦ繝舌・繧貞ｼ輔￥縲ょ・蟷・1.9rem 縺ｮ荳ｭ蠢・= 0.95rem縲・
+   繝峨ャ繝井ｸｭ蠢・= 荳翫°繧・0.975rem縲∬｡御ｸ狗ｫｯ縺九ｉ谺｡繝峨ャ繝井ｸｭ蠢・∪縺ｧ = 菴咏區0.85rem + 0.975rem */
 .chat-item:not(:last-child)::after {
   content: "";
   position: absolute;
@@ -957,7 +966,7 @@ h1 .brand-accent,
   cursor: pointer;
 }
 
-/* ── Drawer ── */
+/* 笏笏 Drawer 笏笏 */
 
 .drawer-overlay {
   position: absolute;
@@ -1187,7 +1196,7 @@ h1 .brand-accent,
   width: calc(100% - 2rem);
 }
 
-/* ── Password change dialog ── */
+/* 笏笏 Password change dialog 笏笏 */
 
 .password-overlay {
   position: fixed;
@@ -1278,7 +1287,7 @@ h1 .brand-accent,
   border: 1px solid var(--separator);
 }
 
-/* ── Toast ── */
+/* 笏笏 Toast 笏笏 */
 
 .toast {
   position: absolute;
@@ -1302,7 +1311,7 @@ h1 .brand-accent,
   transform: translateX(-50%) translateY(0);
 }
 
-/* ── Keyframes ── */
+/* 笏笏 Keyframes 笏笏 */
 
 @keyframes livePulse {
   0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.5); }
@@ -1329,7 +1338,7 @@ h1 .brand-accent,
   100% { transform: scale(1.85); opacity: 0; }
 }
 
-/* ── Large screens: auth only (translator stays phone layout) ── */
+/* 笏笏 Large screens: auth only (translator stays phone layout) 笏笏 */
 
 @media (min-width: 720px) {
   .auth-view {
@@ -1343,7 +1352,7 @@ h1 .brand-accent,
   }
 }
 
-/* ── Compact height (small phones) ── */
+/* 笏笏 Compact height (small phones) 笏笏 */
 
 @media (max-height: 640px) {
   .panel-text {
@@ -1370,7 +1379,7 @@ h1 .brand-accent,
   }
 }
 
-/* ── Reduced Motion ── */
+/* 笏笏 Reduced Motion 笏笏 */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1380,7 +1389,7 @@ h1 .brand-accent,
 }
 
 
-/* ── Nav Actions (admin button group) ── */
+/* 笏笏 Nav Actions (admin button group) 笏笏 */
 
 .nav-actions {
     display: flex;
@@ -1393,7 +1402,7 @@ h1 .brand-accent,
     grid-template-columns: 2.5rem 1fr auto;
 }
 
-/* ── Admin Auth Login ── */
+/* 笏笏 Admin Auth Login 笏笏 */
 
 .admin-auth-icon {
   width: 4rem;
@@ -1411,7 +1420,7 @@ h1 .brand-accent,
   font-size: 1.625rem;
 }
 
-/* ── Admin View ── */
+/* 笏笏 Admin View 笏笏 */
 
 .admin-view {
   position: absolute;
@@ -1926,7 +1935,7 @@ h1 .brand-accent,
   color: var(--pink);
 }
 
-/* ── Admin Add Form ── */
+/* 笏笏 Admin Add Form 笏笏 */
 
 .admin-add-form {
   display: flex;
@@ -2130,7 +2139,7 @@ h1 .brand-accent,
   }
 }
 
-/* ── Confirm Dialog ── */
+/* 笏笏 Confirm Dialog 笏笏 */
 
 .dialog-overlay {
     position: absolute;

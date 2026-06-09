@@ -9,14 +9,13 @@
     <link rel="stylesheet" href="admin.css" />
   </head>
   <body class="dash-body">
-    <!-- ログイン -->
     <div class="dash-login" id="loginScreen">
       <div class="dash-login-card">
         <div class="dash-login-brand">
           <span class="dash-login-logo">AMALINK <span>Translation</span></span>
           <span class="dash-login-badge">Admin</span>
         </div>
-        <h1 class="dash-login-title">管理者ログイン</h1>
+        <h1 class="dash-login-title">管理ログイン</h1>
         <p class="dash-login-desc">ダッシュボードにアクセスするには認証が必要です。</p>
         <form class="dash-login-form" id="loginForm" autocomplete="on">
           <label class="dash-field">
@@ -44,7 +43,6 @@
       </div>
     </div>
 
-    <!-- ダッシュボード -->
     <div class="dash-shell is-hidden" id="dashboard">
       <aside class="dash-sidebar">
         <div class="dash-sidebar-brand">
@@ -81,19 +79,19 @@
           <div class="dash-stats">
             <div class="dash-stat-card">
               <span class="dash-stat-label">登録ユーザー</span>
-              <span class="dash-stat-value" id="statTotal">—</span>
+              <span class="dash-stat-value" id="statTotal">-</span>
             </div>
             <div class="dash-stat-card">
               <span class="dash-stat-label">環境設定ID</span>
-              <span class="dash-stat-value" id="statSeeded">—</span>
+              <span class="dash-stat-value" id="statSeeded">-</span>
             </div>
             <div class="dash-stat-card">
               <span class="dash-stat-label">追加済みID</span>
-              <span class="dash-stat-value" id="statCustom">—</span>
+              <span class="dash-stat-value" id="statCustom">-</span>
             </div>
             <div class="dash-stat-card dash-stat-card-accent">
               <span class="dash-stat-label">表示中</span>
-              <span class="dash-stat-value" id="statVisible">—</span>
+              <span class="dash-stat-value" id="statVisible">-</span>
             </div>
           </div>
 

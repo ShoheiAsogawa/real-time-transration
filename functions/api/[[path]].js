@@ -427,7 +427,7 @@ function hasForbiddenContentPayload(value) {
 
 function rejectContentPayload(payload) {
       if (hasForbiddenContentPayload(payload)) {
-              throw new Error("Conversation text, translation text, and audio payloads are not accepted");
+              throw new Error("会話本文・翻訳本文・音声・文字起こし本文は保存できません。利用メタデータのみ送信してください。");
       }
 }
 
@@ -725,7 +725,7 @@ async function quotaSnapshot(env, accountId) {
              FROM usage_daily_rollups WHERE account_id = ? AND date = ?`
       ).bind(accountId, today).first();
       const adjustmentRow = await db.prepare(
-            `SELECT COALESCE(SUM(minutes), 0) AS minutes FROM quota_adjustments
+            `SELECT COALESCE(SUM(minutes), 0) AS minutes, COALESCE(SUM(price_jpy), 0) AS price_jpy FROM quota_adjustments
              WHERE account_id = ? AND created_at >= ?`
       ).bind(accountId, monthStart).first();
       const activeRow = await db.prepare(
@@ -740,10 +740,12 @@ async function quotaSnapshot(env, accountId) {
       const actualMonthSeconds = Number(monthRow?.seconds || 0);
       const actualDaySeconds = Number(dayRow?.seconds || 0);
       const adjustmentMinutes = Number(adjustmentRow?.minutes || 0);
+      const adjustmentRevenueJpy = Number(adjustmentRow?.price_jpy || 0);
       const monthSeconds = actualMonthSeconds + reservedSeconds;
       const daySeconds = actualDaySeconds + reservedSeconds;
       const estimatedCostJpy = Number(monthRow?.cost || 0);
-      const revenue = Number(account.monthly_revenue_jpy || account.monthly_price_jpy || 0);
+      const monthlyRevenueJpy = Number(account.monthly_revenue_jpy || account.monthly_price_jpy || 0);
+      const revenue = monthlyRevenueJpy + adjustmentRevenueJpy;
       const costRatio = revenue > 0 ? estimatedCostJpy / revenue : 0;
 
       return {
@@ -755,6 +757,8 @@ async function quotaSnapshot(env, accountId) {
               actualDaySeconds,
               reservedSeconds,
               adjustmentMinutes,
+              adjustmentRevenueJpy,
+              totalRevenueJpy: revenue,
               monthlyLimitSeconds: monthlyLimitMinutes * 60,
               dailyLimitSeconds: dailyLimitMinutes * 60,
               activeSessions: Number(activeRow?.count || 0),
@@ -852,7 +856,7 @@ async function routeApi(request, env) {
   // /api/login
   if (url.pathname === "/api/login" && request.method === "POST") {
           if (await isAuthRateLimited(request, env)) {
-                    return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
+                    return json({ error: "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。" }, 429);
           }
           const { accessId, password, deviceId } = await readJson(request);
           if (!isValidDeviceId(deviceId)) {
@@ -872,7 +876,7 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "user") return json({ error: "Forbidden" }, 403);
           if (await isPasswordChangeRateLimited(env, session.sessionId)) {
-                    return json({ error: "試行回数が多すぎます。時間を置いて再試行してください。" }, 429);
+                    return json({ error: "試行回数が多すぎます。しばらく待ってから再度お試しください。" }, 429);
           }
 
           const { currentPassword, newPassword } = await readJson(request);
@@ -910,7 +914,7 @@ async function routeApi(request, env) {
   // /api/admin/login
   if (url.pathname === "/api/admin/login" && request.method === "POST") {
           if (await isAuthRateLimited(request, env)) {
-                    return json({ error: "ログイン試行が多すぎます。時間を置いて再試行してください。" }, 429);
+                    return json({ error: "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。" }, 429);
           }
           const { email, password } = await readJson(request);
           const valid = await verifyAdminCredentials(env, email, password);
@@ -1117,7 +1121,9 @@ async function routeApi(request, env) {
                       daily_seconds: snapshot.actualDaySeconds,
                       reserved_seconds: snapshot.reservedSeconds,
                       adjustment_minutes: snapshot.adjustmentMinutes,
+                      adjustment_revenue_jpy: snapshot.adjustmentRevenueJpy,
                       estimated_cost_jpy: snapshot.estimatedCostJpy,
+                      total_revenue_jpy: snapshot.totalRevenueJpy,
                       active_sessions: snapshot.activeSessions,
                       cost_ratio: snapshot.costRatio,
                       monthly_limit_seconds: snapshot.monthlyLimitSeconds,
@@ -1174,18 +1180,18 @@ async function routeApi(request, env) {
         const { id, password } = await readJson(request);
           const normalizedId = normalizeId(id);
           if (!normalizedId || normalizedId.length > 128) {
-                    return json({ error: "IDが無効です" }, 400);
+                    return json({ error: "IDが無効です。" }, 400);
           }
 
         let plainPassword = String(password || "").trim();
           if (!plainPassword) plainPassword = generateInitialPassword();
           if (plainPassword.length < 8) {
-                    return json({ error: "パスワードは8文字以上必要です" }, 400);
+                    return json({ error: "パスワードは8文字以上必要です。" }, 400);
           }
 
         const users = await getUsers(env);
           if (users.some((user) => idsMatch(user.id, normalizedId))) {
-                    return json({ error: "そのIDはすでに存在します" }, 409);
+                    return json({ error: "そのIDはすでに存在します。" }, 409);
           }
           const passwordHash = await createPasswordHash(plainPassword, env);
           users.push({ id: normalizedId, role: "user", seeded: false, passwordHash, mustChangePassword: true });

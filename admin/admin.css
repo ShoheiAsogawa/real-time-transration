@@ -672,11 +672,17 @@
   color: #c93400;
 }
 
+.dash-table-badge.is-danger {
+  background: rgba(255, 59, 48, 0.14);
+  color: #d70015;
+}
+
 .dash-table-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.375rem;
+  flex-wrap: wrap;
 }
 
 .dash-table-copy {
@@ -715,6 +721,29 @@
 .dash-table-del:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.dash-quota-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.dash-quota-input,
+.dash-quota-price {
+  width: 4.5rem;
+  height: 1.875rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--separator);
+  border-radius: 0.375rem;
+  background: var(--fill);
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.dash-quota-price {
+  width: 5rem;
 }
 
 .dash-empty {

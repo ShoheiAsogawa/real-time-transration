@@ -38,6 +38,22 @@ const dialogMessage = document.querySelector("#dialogMessage");
 const dialogCancel = document.querySelector("#dialogCancel");
 const dialogConfirm = document.querySelector("#dialogConfirm");
 
+const ERROR_MESSAGES = {
+  "Not authenticated": "ログインが必要です。",
+  "Forbidden": "この操作を行う権限がありません。",
+  "Invalid origin": "このアクセス元からは利用できません。",
+  "monthly_quota_exhausted": "今月の利用上限に達したため、新しい翻訳を開始できません。",
+  "daily_quota_exhausted": "本日の利用上限に達したため、新しい翻訳を開始できません。",
+  "cost_ratio_stop": "原価率が上限を超えたため、新しい翻訳を開始できません。",
+  "concurrent_limit": "同時接続数の上限に達しています。",
+  "password_change_required": "翻訳を開始する前にパスワードを変更してください。"
+};
+
+function displayErrorMessage(error) {
+  const key = String(error || "").trim();
+  return ERROR_MESSAGES[key] || key || "リクエストに失敗しました。";
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -47,12 +63,17 @@ async function api(path, options = {}) {
   const text = await response.text();
   let payload = {};
   if (text) {
-    try { payload = JSON.parse(text); }
-    catch { throw new Error("サーバー応答の解析に失敗しました"); }
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error("サーバーの応答を読み取れませんでした。");
+    }
   }
   if (!response.ok) {
-    if (response.status === 429) throw new Error(payload.error || "ログイン試行が多すぎます。");
-    throw new Error(payload.error || "Request failed");
+    if (response.status === 429) {
+      throw new Error(displayErrorMessage(payload.error || "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。"));
+    }
+    throw new Error(displayErrorMessage(payload.error));
   }
   return payload;
 }
@@ -123,42 +144,44 @@ function generateAccessId() {
   return `team_${part(4)}-${part(4)}`;
 }
 
-async function copyId(id, rowEl) {
+async function copyText(text, successMessage, failureMessage) {
   try {
-    await navigator.clipboard.writeText(id);
-    showToast("IDをコピーしました");
-    if (rowEl) {
-      rowEl.classList.add("is-copied");
-      const btn = rowEl.querySelector(".dash-table-copy");
-      const prev = btn?.textContent;
-      if (btn) btn.textContent = "済";
-      setTimeout(() => {
-        rowEl.classList.remove("is-copied");
-        if (btn && prev) btn.textContent = prev;
-      }, 1600);
-    }
+    await navigator.clipboard.writeText(text);
+    showToast(successMessage);
+    return true;
   } catch {
-    showToast("コピーに失敗しました");
+    showToast(failureMessage);
+    return false;
   }
+}
+
+async function copyId(id, rowEl) {
+  const copied = await copyText(id, "IDをコピーしました。", "コピーに失敗しました。");
+  if (!copied || !rowEl) return;
+  rowEl.classList.add("is-copied");
+  const btn = rowEl.querySelector(".dash-table-copy");
+  const prev = btn?.textContent;
+  if (btn) btn.textContent = "済";
+  setTimeout(() => {
+    rowEl.classList.remove("is-copied");
+    if (btn && prev) btn.textContent = prev;
+  }, 1600);
 }
 
 function updateStats(users, visible) {
   const total = users.length;
   const seeded = users.filter((u) => u.seeded).length;
-  const custom = total - seeded;
   statTotal.textContent = String(total);
   statSeeded.textContent = String(seeded);
-  statCustom.textContent = String(custom);
-  statVisible.textContent = visible === undefined ? "—" : String(visible);
+  statCustom.textContent = String(total - seeded);
+  statVisible.textContent = visible === undefined ? "-" : String(visible);
   searchWrap.hidden = total === 0;
 }
 
 function renderTable(users) {
   state.users = sortUsers(users);
   const query = (userSearch?.value || "").trim().toLowerCase();
-  const filtered = query
-    ? state.users.filter((u) => u.id.toLowerCase().includes(query))
-    : state.users;
+  const filtered = query ? state.users.filter((u) => u.id.toLowerCase().includes(query)) : state.users;
 
   updateStats(state.users, filtered.length);
   searchClear.hidden = !query;
@@ -232,17 +255,17 @@ function renderTable(users) {
     delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
     if (u.seeded) {
       delBtn.disabled = true;
-      delBtn.title = "環境設定で定義されたIDは削除できません";
+      delBtn.title = "環境設定で定義されたIDは削除できません。";
     }
     delBtn.addEventListener("click", () => {
       if (u.seeded) {
-        showToast("環境設定で定義されたIDは削除できません");
+        showToast("環境設定で定義されたIDは削除できません。");
         return;
       }
       showConfirm(`「${u.id}」を削除しますか？`, async () => {
         try {
           const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, { method: "DELETE" });
-          showToast("削除しました");
+          showToast("削除しました。");
           renderTable(updated);
         } catch (e) {
           showToast(e.message);
@@ -267,6 +290,28 @@ function formatMoney(value) {
   return `${Math.round(Number(value || 0)).toLocaleString("ja-JP")}円`;
 }
 
+function formatPercent(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function accountStatusLabel(account) {
+  const status = String(account.status || "");
+  const ratio = Number(account.cost_ratio || 0);
+  const remaining = Number(account.remaining_seconds || 0);
+  const dailyRemaining = Number(account.daily_remaining_seconds || 0);
+  if (status !== "active") return "停止中";
+  if (ratio >= 0.45) return "原価率超過";
+  if (remaining <= 0 || dailyRemaining <= 0) return "上限到達";
+  return "利用可能";
+}
+
+function accountStatusClass(account) {
+  const label = accountStatusLabel(account);
+  if (label === "利用可能") return "is-custom";
+  if (label === "停止中") return "is-pending";
+  return "is-danger";
+}
+
 function getAccountPanel() {
   let panel = document.querySelector("#accountUsagePanel");
   if (panel) return panel;
@@ -276,7 +321,7 @@ function getAccountPanel() {
   panel.innerHTML = `
     <div class="dash-panel-head">
       <div>
-        <h2 class="dash-panel-title">B2B usage gate</h2>
+        <h2 class="dash-panel-title">契約アカウント</h2>
         <p class="dash-panel-desc">契約アカウント別の利用量、原価率、停止状態を確認します。</p>
       </div>
       <button class="dash-btn dash-btn-icon" id="refreshAccountsBtn" type="button" title="更新" aria-label="更新">
@@ -287,7 +332,7 @@ function getAccountPanel() {
       </button>
     </div>
     <div class="dash-privacy-note">
-      本文・翻訳本文・音声・文字起こし本文は保存しません。保存するのは利用分数、日時、アカウント、推定原価などの利用メタデータのみです。
+      会話本文・翻訳本文・音声・文字起こし本文は保存しません。保存するのは利用分数、日時、アカウント、推定原価などの利用メタデータのみです。
     </div>
     <div class="dash-table-wrap" id="accountTableWrap">
       <p class="dash-loading"><span class="admin-spinner"></span>読み込み中...</p>
@@ -314,16 +359,17 @@ function renderAccounts(accounts) {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>Account</th>
-        <th>Plan</th>
-        <th>Usage</th>
-        <th>Cost</th>
-        <th>Status</th>
-        <th>Actions</th>
+        <th>会社名</th>
+        <th>プラン</th>
+        <th>利用量</th>
+        <th>収益性</th>
+        <th>停止状態</th>
+        <th>操作</th>
       </tr>
     </thead>
     <tbody></tbody>`;
   const tbody = table.querySelector("tbody");
+
   for (const account of state.accounts) {
     const used = Number(account.month_seconds || 0);
     const reserved = Number(account.reserved_seconds || 0);
@@ -331,6 +377,11 @@ function renderAccounts(accounts) {
     const dailyUsed = Number(account.daily_seconds || 0);
     const dailyLimit = Number(account.daily_limit_seconds || Number(account.daily_minutes || 0) * 60);
     const ratio = Number(account.cost_ratio || 0);
+    const monthlyRevenue = Number(account.monthly_revenue_jpy || account.monthly_price_jpy || 0);
+    const adjustmentRevenue = Number(account.adjustment_revenue_jpy || 0);
+    const revenue = Number(account.total_revenue_jpy || monthlyRevenue + adjustmentRevenue);
+    const cost = Number(account.estimated_cost_jpy || 0);
+    const grossProfit = revenue - cost;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>
@@ -340,18 +391,26 @@ function renderAccounts(accounts) {
       </td>
       <td>${account.plan_name || account.plan_id}</td>
       <td>
-        ${formatMinutes(used)} / ${formatMinutes(limit)}
-        <span class="dash-muted">本日 ${formatMinutes(dailyUsed)} / ${formatMinutes(dailyLimit)}</span>
+        今月 ${formatMinutes(used)} / ${formatMinutes(limit)}
+        <span class="dash-muted">今日 ${formatMinutes(dailyUsed)} / ${formatMinutes(dailyLimit)}</span>
+        <span class="dash-muted">残り ${formatMinutes(account.remaining_seconds || 0)}</span>
         <span class="dash-muted">予約中 ${formatMinutes(reserved)} / 追加 ${account.adjustment_minutes || 0}分</span>
-        <span class="dash-muted">開始可能 ${formatMinutes(account.remaining_seconds || 0)} / Active ${account.active_sessions || 0}</span>
+        <span class="dash-muted">同時接続 ${account.active_sessions || 0}</span>
       </td>
-      <td>${formatMoney(account.estimated_cost_jpy)}<br><span class="dash-muted">原価率 ${(ratio * 100).toFixed(1)}%</span></td>
-      <td><span class="dash-table-badge ${account.status === "active" ? "is-custom" : "is-pending"}">${account.status}</span></td>
+      <td>
+        <span>月額売上 ${formatMoney(monthlyRevenue)}</span>
+        <span class="dash-muted">追加売上 ${formatMoney(adjustmentRevenue)}</span>
+        <span class="dash-muted">合計売上 ${formatMoney(revenue)}</span>
+        <span class="dash-muted">推定API原価 ${formatMoney(cost)}</span>
+        <span class="dash-muted">粗利 ${formatMoney(grossProfit)}</span>
+        <span class="dash-muted">原価率 ${formatPercent(ratio)}</span>
+      </td>
+      <td><span class="dash-table-badge ${accountStatusClass(account)}">${accountStatusLabel(account)}</span></td>
       <td class="dash-table-actions"></td>`;
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = account.status === "active" ? "dash-table-del" : "dash-table-copy";
-    toggleBtn.textContent = account.status === "active" ? "停止" : "再開";
+    toggleBtn.textContent = account.status === "active" ? "停止する" : "再開する";
     toggleBtn.addEventListener("click", async () => {
       const next = account.status === "active" ? "suspended" : "active";
       try {
@@ -359,15 +418,43 @@ function renderAccounts(accounts) {
           method: "PATCH",
           body: JSON.stringify({ status: next })
         });
-        showToast(next === "active" ? "再開しました" : "停止しました");
+        showToast(next === "active" ? "再開しました。" : "停止しました。");
         loadAccounts();
       } catch (error) {
         showToast(error.message);
       }
     });
-    tr.querySelector(".dash-table-actions").appendChild(toggleBtn);
+    const quotaForm = document.createElement("form");
+    quotaForm.className = "dash-quota-form";
+    quotaForm.innerHTML = `
+      <input class="dash-quota-input" type="number" min="1" step="1" value="30" aria-label="追加分数" />
+      <input class="dash-quota-price" type="number" min="0" step="100" value="0" aria-label="追加請求額" />
+      <button class="dash-table-copy" type="submit">分数追加</button>`;
+    quotaForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const minutesInput = quotaForm.querySelector(".dash-quota-input");
+      const priceInput = quotaForm.querySelector(".dash-quota-price");
+      const minutes = Math.max(0, Number(minutesInput?.value || 0));
+      const priceJpy = Math.max(0, Number(priceInput?.value || 0));
+      if (!minutes) {
+        showToast("追加分数を入力してください。");
+        return;
+      }
+      try {
+        await api(`/api/admin/accounts/${encodeURIComponent(account.id)}/quota-adjustments`, {
+          method: "POST",
+          body: JSON.stringify({ minutes, priceJpy, reason: "admin_adjustment" })
+        });
+        showToast(`${minutes}分を追加しました。`);
+        loadAccounts();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+    tr.querySelector(".dash-table-actions").append(toggleBtn, quotaForm);
     tbody.appendChild(tr);
   }
+
   wrap.innerHTML = "";
   wrap.appendChild(table);
 }
@@ -416,7 +503,7 @@ async function handleAddUser() {
   const id = newUserId.value.trim();
   const password = newUserPassword.value.trim();
   if (!id) {
-    setFormMessage("IDを入力してください");
+    setFormMessage("IDを入力してください。");
     return;
   }
   setFormMessage("");
@@ -431,18 +518,16 @@ async function handleAddUser() {
     });
     newUserId.value = "";
     newUserPassword.value = "";
-    const initialPassword = result.initialPassword;
-    setFormMessage(`「${id}」を追加しました`, "success");
-    if (initialPassword) {
-      showCredentialsDialog(id, initialPassword);
-      try {
-        await navigator.clipboard.writeText(`ID: ${id}\nパスワード: ${initialPassword}`);
-        showToast("クリップボードにコピーしました");
-      } catch {
-        showToast("クリップボードへのコピーに失敗しました。表示中の情報を控えてください");
-      }
+    setFormMessage(`「${id}」を追加しました。`, "success");
+    if (result.initialPassword) {
+      showCredentialsDialog(id, result.initialPassword);
+      await copyText(
+        `ID: ${id}\nパスワード: ${result.initialPassword}`,
+        "クリップボードにコピーしました。",
+        "クリップボードへのコピーに失敗しました。表示中の情報を控えてください。"
+      );
     } else {
-      showToast(`「${id}」を追加しました`);
+      showToast(`「${id}」を追加しました。`);
     }
     renderTable(result.users);
     await copyId(id);
@@ -520,23 +605,24 @@ passwordToggle?.addEventListener("click", () => {
   const show = adminPasswordInput.type === "password";
   adminPasswordInput.type = show ? "text" : "password";
   passwordToggle.classList.toggle("is-visible", show);
+  passwordToggle.setAttribute("aria-label", show ? "パスワードを隠す" : "パスワードを表示");
 });
 newUserPasswordToggle?.addEventListener("click", () => {
   const show = newUserPassword.type === "password";
   newUserPassword.type = show ? "text" : "password";
   newUserPasswordToggle.classList.toggle("is-visible", show);
+  newUserPasswordToggle.setAttribute("aria-label", show ? "パスワードを隠す" : "パスワードを表示");
 });
 credCloseBtn?.addEventListener("click", closeCredentialsDialog);
 credCopyBtn?.addEventListener("click", async () => {
   const id = credId?.textContent || "";
   const password = credPassword?.textContent || "";
   if (!id || !password) return;
-  try {
-    await navigator.clipboard.writeText(`ID: ${id}\nパスワード: ${password}`);
-    showToast("クリップボードにコピーしました");
-  } catch {
-    showToast("クリップボードへのコピーに失敗しました");
-  }
+  await copyText(
+    `ID: ${id}\nパスワード: ${password}`,
+    "クリップボードにコピーしました。",
+    "クリップボードへのコピーに失敗しました。"
+  );
 });
 credentialsOverlay?.addEventListener("click", (e) => {
   if (e.target === credentialsOverlay) closeCredentialsDialog();
