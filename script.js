@@ -6,11 +6,13 @@ const SELF_LANG_LABEL = "日本語";
 const PARTNER_LANG_LABEL = "自動認識";
 
 const defaultSettings = {
-      pushToTalk: false
+      pushToTalk: false,
+      darkMode: false
 };
 
 let memoryDeviceId = "";
 const settings = loadSettings();
+applyTheme();
 
 const state = {
       pc: null, dc: null, stream: null, user: null,
@@ -82,6 +84,8 @@ const partnerLangLabel = document.querySelector("#partnerLangLabel");
 const selfLangLabel = document.querySelector("#selfLangLabel");
 const livePill = document.querySelector("#livePill");
 const pushToTalkToggle = document.querySelector("#pushToTalkToggle");
+const darkModeToggle = document.querySelector("#darkModeToggle");
+const themeColorMeta = document.querySelector("#themeColorMeta");
 
 /* ───────── Settings / Device ───────── */
 
@@ -97,7 +101,14 @@ function loadSettings() {
 function normalizeSettings(value) {
       const normalized = { ...defaultSettings, ...(value || {}) };
       normalized.pushToTalk = !!normalized.pushToTalk;
+      normalized.darkMode = !!normalized.darkMode;
       return normalized;
+}
+
+function applyTheme() {
+      const theme = settings.darkMode ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", theme);
+      if (themeColorMeta) themeColorMeta.content = settings.darkMode ? "#111111" : "#ffffff";
 }
 
 function saveSettings() {
@@ -117,12 +128,15 @@ function getDeviceId() {
 
 function populateSettingsUi() {
       if (pushToTalkToggle) pushToTalkToggle.checked = settings.pushToTalk;
+      if (darkModeToggle) darkModeToggle.checked = settings.darkMode;
       if (selfLangLabel) selfLangLabel.textContent = SELF_LANG_LABEL;
       if (partnerLangLabel) partnerLangLabel.textContent = PARTNER_LANG_LABEL;
+      applyTheme();
 }
 
 function applySettingsFromUi() {
       if (pushToTalkToggle) settings.pushToTalk = pushToTalkToggle.checked;
+      if (darkModeToggle) settings.darkMode = darkModeToggle.checked;
       Object.assign(settings, normalizeSettings(settings));
       populateSettingsUi();
       saveSettings();
@@ -902,6 +916,7 @@ livePill?.addEventListener("click", () => {
 });
 
 pushToTalkToggle?.addEventListener("change", applySettingsFromUi);
+darkModeToggle?.addEventListener("change", applySettingsFromUi);
 
 if (resumeLiveBtn) resumeLiveBtn.addEventListener("click", resumeLiveTranslation);
 
