@@ -11,11 +11,10 @@ preview_id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 # 1. Dashboard → D1 → Create database: lingualive-b2b-usage
 # 2. migrations/0001_b2b_usage.sql を適用
 # 3. Pages → Settings → Functions → D1 bindings → binding name: DB
-# ローカル wrangler 用に database_id が分かっている場合のみ、下をコメント解除する:
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "lingualive-b2b-usage"
-# database_id = "<your-d1-database-uuid>"
+[[d1_databases]]
+binding = "DB"
+database_name = "lingualive-b2b-usage"
+database_id = "6dd11bd3-b388-4d75-8079-6d0d3124d6cd"
 
 [vars]
 # ── シードユーザー（一般ユーザー） ──────────────────────────────────────────
