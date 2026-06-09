@@ -17,7 +17,7 @@ ALLOWED_LOGIN_IDS = "user1,user2"
 SEED_USER_PASSWORD_HASH = "100000:9ef51164921ca81a5a7e1b32b8b434f3:9c3d25891f6e8c6072fe100479e4f0032a66fe4fe6c9183e17a2bd4137061f40"
 
 # ── 管理者 ──────────────────────────────────────────────────────────────────
-ADMIN_EMAIL = "admin@lingualive.local"
+ADMIN_EMAIL = "uken.shohei@gmail.com"
 
 # 管理者パスワードハッシュ（npm run hash-password -- <PASSWORD>）
 # 本番では wrangler secret put ADMIN_PASSWORD_HASH で上書きすること
