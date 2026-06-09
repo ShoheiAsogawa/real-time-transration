@@ -127,33 +127,11 @@
           <button class="history-banner-btn" id="resumeLiveBtn" type="button">新しい翻訳を開始</button>
         </div>
 
-        <div class="mic-bar mic-bar-partner" id="partnerMicBar">
-          <p class="mic-hint" id="partnerMicHint">マイクボタンをタップして話してください</p>
-          <button class="mic-fab" id="partnerMicButton" type="button" aria-pressed="false" aria-describedby="partnerMicHint">
-            <span class="mic-fab-rings" aria-hidden="true">
-              <span class="mic-ring"></span>
-              <span class="mic-ring"></span>
-              <span class="mic-ring"></span>
-            </span>
-            <span class="mic-fab-core">
-              <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
-                <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
-                <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-              <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
-              </svg>
-            </span>
-            <span class="mic-level" id="partnerMicLevel" aria-hidden="true"></span>
-          </button>
-        </div>
-
         <div class="dual-panel" id="dualPanel" aria-live="polite">
           <section class="panel panel-partner" id="partnerPanel">
             <header class="panel-header">
               <span class="panel-badge panel-badge-partner">相手向け</span>
-              <span class="panel-lang" id="partnerLangLabel">English</span>
+              <span class="panel-lang" id="partnerLangLabel">自動認識</span>
             </header>
             <div class="panel-body">
               <p class="panel-text" id="partnerText">
@@ -161,6 +139,29 @@
               </p>
             </div>
           </section>
+
+          <div class="mic-bar" id="micBar">
+            <p class="mic-hint" id="micHint">マイクボタンをタップして話してください</p>
+            <button class="mic-fab" id="micButton" type="button" aria-pressed="false" aria-describedby="micHint">
+              <span class="mic-fab-rings" aria-hidden="true">
+                <span class="mic-ring"></span>
+                <span class="mic-ring"></span>
+                <span class="mic-ring"></span>
+              </span>
+              <span class="mic-fab-core">
+                <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
+                  <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
+                  <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+                <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
+                  <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+                </svg>
+              </span>
+              <span class="mic-level" id="micLevel" aria-hidden="true"></span>
+            </button>
+            <span class="visually-hidden" id="micLabel">タップして開始</span>
+          </div>
 
           <section class="panel panel-self" id="selfPanel">
             <header class="panel-header">
@@ -176,29 +177,6 @@
         </div>
 
         <div class="chat-list is-hidden" id="chatList" aria-live="polite"></div>
-
-        <div class="mic-bar mic-bar-self" id="micBar">
-          <p class="mic-hint" id="micHint">マイクボタンをタップして話してください</p>
-          <button class="mic-fab" id="micButton" type="button" aria-pressed="false" aria-describedby="micHint">
-            <span class="mic-fab-rings" aria-hidden="true">
-              <span class="mic-ring"></span>
-              <span class="mic-ring"></span>
-              <span class="mic-ring"></span>
-            </span>
-            <span class="mic-fab-core">
-              <svg class="icon-mic" width="30" height="30" viewBox="0 0 24 24" fill="none">
-                <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" />
-                <path d="M5 11a7 7 0 0014 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                <path d="M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-              <svg class="icon-stop" width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
-              </svg>
-            </span>
-            <span class="mic-level" id="micLevel" aria-hidden="true"></span>
-          </button>
-          <span class="visually-hidden" id="micLabel">タップして開始</span>
-        </div>
 
         <audio id="remoteAudio" autoplay playsinline></audio>
       </main>
@@ -227,14 +205,6 @@
             <span class="setting-label">長押しで話す（PTT）</span>
             <input class="setting-toggle" id="pushToTalkToggle" type="checkbox" />
           </label>
-          <div class="setting-row setting-row-select">
-            <label class="setting-label" for="langSelfSelect">自分向け（下）</label>
-            <select class="setting-select" id="langSelfSelect"></select>
-          </div>
-          <div class="setting-row setting-row-select">
-            <label class="setting-label" for="langPartnerSelect">相手向け（上）</label>
-            <select class="setting-select" id="langPartnerSelect"></select>
-          </div>
         </section>
         <button class="settings-link" id="changePasswordBtn" type="button">パスワードを変更</button>
         <button class="logout-link" id="logoutButton" type="button">ログアウト</button>

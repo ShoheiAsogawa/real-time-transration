@@ -2,19 +2,11 @@ const HISTORY_KEY = "lingualive_history_v2";
 const SETTINGS_KEY = "lingualive_settings_v1";
 const DEVICE_ID_KEY = "ll_device_id";
 
-const LANGUAGES = [
-      { code: "ja", label: "日本語" },
-      { code: "en", label: "English" },
-      { code: "zh", label: "中文" },
-      { code: "ko", label: "한국어" },
-      { code: "es", label: "Español" },
-      { code: "fr", label: "Français" }
-];
+const SELF_LANG_LABEL = "日本語";
+const PARTNER_LANG_LABEL = "自動認識";
 
 const defaultSettings = {
-      pushToTalk: false,
-      langSelf: "ja",
-      langPartner: "en"
+      pushToTalk: false
 };
 
 let memoryDeviceId = "";
@@ -82,14 +74,14 @@ const newConversationButton = document.querySelector("#newConversationButton");
 const sessionList = document.querySelector("#sessionList");
 const toast = document.querySelector("#toast");
 const dualPanel = document.querySelector("#dualPanel");
+const partnerPanel = document.querySelector("#partnerPanel");
+const selfPanel = document.querySelector("#selfPanel");
 const partnerText = document.querySelector("#partnerText");
 const selfText = document.querySelector("#selfText");
 const partnerLangLabel = document.querySelector("#partnerLangLabel");
 const selfLangLabel = document.querySelector("#selfLangLabel");
 const livePill = document.querySelector("#livePill");
 const pushToTalkToggle = document.querySelector("#pushToTalkToggle");
-const langSelfSelect = document.querySelector("#langSelfSelect");
-const langPartnerSelect = document.querySelector("#langPartnerSelect");
 
 /* ───────── Settings / Device ───────── */
 
@@ -103,12 +95,7 @@ function loadSettings() {
 }
 
 function normalizeSettings(value) {
-      const validCodes = new Set(LANGUAGES.map((entry) => entry.code));
       const normalized = { ...defaultSettings, ...(value || {}) };
-      if (!validCodes.has(normalized.langSelf)) normalized.langSelf = defaultSettings.langSelf;
-      if (!validCodes.has(normalized.langPartner)) normalized.langPartner = defaultSettings.langPartner;
-      if (normalized.langSelf === normalized.langPartner) normalized.langPartner = defaultSettings.langPartner;
-      if (normalized.langSelf === normalized.langPartner) normalized.langSelf = defaultSettings.langSelf;
       normalized.pushToTalk = !!normalized.pushToTalk;
       return normalized;
 }
@@ -128,32 +115,16 @@ function getDeviceId() {
       return id;
 }
 
-function langLabel(code) {
-      return LANGUAGES.find((entry) => entry.code === code)?.label || code;
-}
-
-function populateLanguageSelects() {
-      if (!langSelfSelect || !langPartnerSelect) return;
-      const markup = LANGUAGES.map((entry) => `<option value="${entry.code}">${entry.label}</option>`).join("");
-      langSelfSelect.innerHTML = markup;
-      langPartnerSelect.innerHTML = markup;
-      langSelfSelect.value = settings.langSelf;
-      langPartnerSelect.value = settings.langPartner;
+function populateSettingsUi() {
       if (pushToTalkToggle) pushToTalkToggle.checked = settings.pushToTalk;
-      syncLanguageLabels();
-}
-
-function syncLanguageLabels() {
-      if (selfLangLabel) selfLangLabel.textContent = langLabel(settings.langSelf);
-      if (partnerLangLabel) partnerLangLabel.textContent = langLabel(settings.langPartner);
+      if (selfLangLabel) selfLangLabel.textContent = SELF_LANG_LABEL;
+      if (partnerLangLabel) partnerLangLabel.textContent = PARTNER_LANG_LABEL;
 }
 
 function applySettingsFromUi() {
       if (pushToTalkToggle) settings.pushToTalk = pushToTalkToggle.checked;
-      if (langSelfSelect) settings.langSelf = langSelfSelect.value;
-      if (langPartnerSelect) settings.langPartner = langPartnerSelect.value;
       Object.assign(settings, normalizeSettings(settings));
-      populateLanguageSelects();
+      populateSettingsUi();
       saveSettings();
       if (state.pc) setMicEnabled(!settings.pushToTalk || state.pttActive);
       updateLiveUi();
@@ -193,37 +164,40 @@ async function api(path, options = {}) {
 /* ───────── 翻訳指示 ───────── */
 
 function buildInstructions() {
-      const selfLang = langLabel(settings.langSelf);
-      const partnerLang = langLabel(settings.langPartner);
       return [
               "You are AMALINK Translation, a realtime face-to-face interpreter.",
-              "Two people face each other across a phone. The bottom side uses " + selfLang + ". The top side uses " + partnerLang + ".",
-              "When the speaker uses " + selfLang + ", translate into " + partnerLang + ".",
-              "When the speaker uses " + partnerLang + ", translate into " + selfLang + ".",
+              "Two people face each other across a phone. The bottom side always uses Japanese. The top side uses the partner's language, detected automatically.",
+              "When the speaker uses Japanese, translate into the partner's language. Detect the partner's language automatically from their speech and prior context.",
+              "When the speaker uses a non-Japanese language, translate into Japanese.",
               "Detect the spoken language automatically and switch direction immediately without commentary.",
               "Return only the translation, with no commentary, labels, or explanations.",
               "Keep the translation natural, concise, and faithful. Preserve names, numbers, and technical terms."
             ].join(" ");
 }
 
-function scoreLanguage(text, code) {
+function scoreJapanese(text) {
       const value = String(text || "");
       if (!value) return 0;
       const kana = (value.match(/[\u3040-\u30ff]/g) || []).length;
       const han = (value.match(/[\u4e00-\u9fff]/g) || []).length;
-      if (code === "ja") return kana * 2 + han * 0.25;
-      if (code === "zh") return kana ? han * 0.25 : han;
-      if (code === "ko") return (value.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
-      if (code === "en") return (value.match(/[a-zA-Z]/g) || []).length;
-      if (code === "es" || code === "fr") return (value.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
-      return value.length * 0.1;
+      return kana * 2 + han;
+}
+
+function scoreNonJapanese(text) {
+      const value = String(text || "");
+      if (!value) return 0;
+      const latin = (value.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+      const hangul = (value.match(/[\uac00-\ud7af\u1100-\u11ff]/g) || []).length;
+      const han = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+      const kana = (value.match(/[\u3040-\u30ff]/g) || []).length;
+      const cjkWithoutJa = kana ? 0 : han;
+      return latin + hangul + cjkWithoutJa;
 }
 
 function guessSpeakerSide(text) {
-      const selfScore = scoreLanguage(text, settings.langSelf);
-      const partnerScore = scoreLanguage(text, settings.langPartner);
-      if (partnerScore > selfScore * 1.15) return "partner";
-      if (selfScore > partnerScore * 1.15) return "self";
+      const jaScore = scoreJapanese(text);
+      const otherScore = scoreNonJapanese(text);
+      if (otherScore > jaScore * 1.15) return "partner";
       return "self";
 }
 
@@ -233,7 +207,7 @@ function setAuthenticated(user) {
       state.user = user;
       authView.classList.add("is-hidden");
       translatorView.classList.remove("is-hidden");
-      populateLanguageSelects();
+      populateSettingsUi();
       renderConversation();
       renderSessionList();
       updateLiveUi();
@@ -483,7 +457,9 @@ function renderPanelText(el, text, { typing = false, placeholder = "" } = {}) {
 }
 
 function renderConversation() {
-      dualPanel?.classList.toggle("is-hidden", state.viewingHistory);
+      dualPanel?.classList.toggle("is-history", state.viewingHistory);
+      partnerPanel?.classList.toggle("is-hidden", state.viewingHistory);
+      selfPanel?.classList.toggle("is-hidden", state.viewingHistory);
       chatList?.classList.toggle("is-hidden", !state.viewingHistory);
 
       if (state.viewingHistory) {
@@ -820,7 +796,7 @@ function resumeLiveTranslation() {
 /* ───────── 起動・イベント ───────── */
 
 async function boot() {
-      populateLanguageSelects();
+      populateSettingsUi();
       try {
               const { user } = await api("/api/me");
               if (user.role === "admin") {
@@ -926,8 +902,6 @@ livePill?.addEventListener("click", () => {
 });
 
 pushToTalkToggle?.addEventListener("change", applySettingsFromUi);
-langSelfSelect?.addEventListener("change", applySettingsFromUi);
-langPartnerSelect?.addEventListener("change", applySettingsFromUi);
 
 if (resumeLiveBtn) resumeLiveBtn.addEventListener("click", resumeLiveTranslation);
 

@@ -457,8 +457,13 @@ h1 .brand-accent,
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
   overflow: hidden;
+}
+
+.dual-panel.is-history {
+  flex: 0 0 auto;
+  grid-template-rows: auto;
 }
 
 .dual-panel.is-hidden {
@@ -471,6 +476,10 @@ h1 .brand-accent,
   flex-direction: column;
   padding: 0.75rem 1rem;
   overflow: hidden;
+}
+
+.panel.is-hidden {
+  display: none;
 }
 
 .panel-partner {
@@ -556,25 +565,22 @@ h1 .brand-accent,
 }
 
 .mic-bar {
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  padding: 0.5rem 1rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   background: var(--bg-elevated);
-}
-
-.mic-bar-partner {
-  padding: 0.65rem 1rem 0.5rem;
-  border-bottom: 1px solid var(--separator);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-}
-
-.mic-bar-self {
-  padding: 0.65rem 1rem max(0.75rem, env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--separator);
+  border-bottom: 1px solid var(--separator);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+.dual-panel.is-history .mic-bar {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  border-top: none;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.06);
 }
 
