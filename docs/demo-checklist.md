@@ -4,9 +4,11 @@ Use this before any hotel, ryokan, or pharmacy demo.
 
 ## Environment
 
-- Replace the placeholder D1 `database_id` in `wrangler.toml`.
+- Create Cloudflare D1 database `lingualive-b2b-usage`.
+- Apply `migrations/0001_b2b_usage.sql` to that database.
+- Bind it to Pages Functions as `DB` (Dashboard → Pages → Settings → Functions → D1 bindings).
+- Do not commit the placeholder `00000000-0000-0000-0000-000000000000` database_id.
 - Run `npm run demo:check`.
-- Apply `migrations/0001_b2b_usage.sql` to the demo D1 database.
 - Confirm demo Free or Lite account exists.
 - Confirm Free is not publicly self-servable.
 

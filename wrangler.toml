@@ -7,10 +7,15 @@ binding = "SESSION_KV"
 id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 preview_id = "c4c6e1d7b1b241e2be88f39cf8cff915"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "lingualive-b2b-usage"
-database_id = "00000000-0000-0000-0000-000000000000"
+# D1 (B2B usage gate) — Pages の Functions にバインドすること
+# 1. Dashboard → D1 → Create database: lingualive-b2b-usage
+# 2. migrations/0001_b2b_usage.sql を適用
+# 3. Pages → Settings → Functions → D1 bindings → binding name: DB
+# ローカル wrangler 用に database_id が分かっている場合のみ、下をコメント解除する:
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "lingualive-b2b-usage"
+# database_id = "<your-d1-database-uuid>"
 
 [vars]
 # ── シードユーザー（一般ユーザー） ──────────────────────────────────────────
