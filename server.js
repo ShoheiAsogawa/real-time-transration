@@ -65,10 +65,12 @@ const localPlans = {
 };
 const localAccount = {
   id: "acct_default",
-  name: "Default Trial Account",
+  name: "管理アカウント",
+  customerName: "管理顧客",
+  contactName: "",
   status: "active",
-  planId: "free",
-  monthlyRevenueJpy: 0,
+  planId: "lite",
+  monthlyRevenueJpy: 9800,
   adjustmentMinutes: 0,
   adjustmentRevenueJpy: 0,
   costPerMinuteJpy: 6.5,
@@ -160,12 +162,18 @@ function generateInitialPassword() {
 }
 
 function publicUsers(list) {
-  return list.map(({ id, role, seeded, passwordHash, mustChangePassword }) => ({
+  return list.map(({ id, role, seeded, passwordHash, mustChangePassword, displayName, accountName, customerName }) => ({
     id,
     role: role || "user",
     seeded: !!seeded,
     hasPassword: !!passwordHash,
-    mustChangePassword: !!mustChangePassword
+    mustChangePassword: !!mustChangePassword,
+    display_name: displayName || "",
+    account_name: accountName || "",
+    customer_name: customerName || "",
+    account_id: localAccount.id,
+    plan_id: localAccount.planId,
+    monthly_revenue_jpy: localAccount.monthlyRevenueJpy
   }));
 }
 
@@ -834,7 +842,8 @@ async function routeApi(req, res) {
       return;
     }
 
-    const { id, password } = await readJson(req);
+    const body = await readJson(req);
+    const { id, password } = body;
     const normalizedId = normalizeId(id);
     if (!normalizedId || normalizedId.length > 128) {
       json(res, 400, { error: "IDが無効です。" });
@@ -850,12 +859,26 @@ async function routeApi(req, res) {
       json(res, 400, { error: "パスワードは8文字以上必要です。" });
       return;
     }
+    const displayName = String(body.displayName || normalizedId).trim().slice(0, 160) || normalizedId;
+    const accountName = String(body.accountName || displayName).trim().slice(0, 160) || displayName;
+    const customerName = String(body.customerName || displayName).trim().slice(0, 160) || displayName;
+    const contactName = String(body.contactName || "").trim().slice(0, 160);
+    const planId = ["lite", "standard", "plus"].includes(String(body.planId || "")) ? String(body.planId) : "lite";
+    const plan = localPlans[planId] || localPlans.lite;
+    localAccount.name = accountName;
+    localAccount.customerName = customerName;
+    localAccount.contactName = contactName;
+    localAccount.planId = planId;
+    localAccount.monthlyRevenueJpy = Math.max(0, Math.round(Number(body.monthlyRevenueJpy || 0))) || plan.monthlyPriceJpy;
     users.push({
       id: normalizedId,
       role: "user",
       seeded: false,
       passwordHash: createPasswordHash(plainPassword),
-      mustChangePassword: true
+      mustChangePassword: true,
+      displayName,
+      accountName,
+      customerName
     });
     allowedPlainIds.add(normalizedId);
     json(res, 200, { ok: true, users: publicUsers(sortUsers(users)), initialPassword: plainPassword });
@@ -1025,6 +1048,8 @@ async function routeApi(req, res) {
       accounts: [{
         id: localAccount.id,
         name: localAccount.name,
+        customer_name: localAccount.customerName,
+        contact_name: localAccount.contactName,
         status: localAccount.status,
         plan_id: localAccount.planId,
         plan_name: snapshot.plan.name,

@@ -12,6 +12,11 @@ const adminLabel = document.querySelector("#adminLabel");
 const adminAvatar = document.querySelector("#adminAvatar");
 const logoutBtn = document.querySelector("#logoutBtn");
 const userTableWrap = document.querySelector("#userTableWrap");
+const newDisplayName = document.querySelector("#newDisplayName");
+const newAccountName = document.querySelector("#newAccountName");
+const newContactName = document.querySelector("#newContactName");
+const newPlanId = document.querySelector("#newPlanId");
+const newMonthlyRevenue = document.querySelector("#newMonthlyRevenue");
 const newUserId = document.querySelector("#newUserId");
 const newUserPassword = document.querySelector("#newUserPassword");
 const newUserPasswordToggle = document.querySelector("#newUserPasswordToggle");
@@ -40,18 +45,30 @@ const dialogConfirm = document.querySelector("#dialogConfirm");
 
 const ERROR_MESSAGES = {
   "Not authenticated": "ログインが必要です。",
-  "Forbidden": "この操作を行う権限がありません。",
+  Forbidden: "この操作を行う権限がありません。",
   "Invalid origin": "このアクセス元からは利用できません。",
-  "monthly_quota_exhausted": "今月の利用上限に達したため、新しい翻訳を開始できません。",
-  "daily_quota_exhausted": "本日の利用上限に達したため、新しい翻訳を開始できません。",
-  "cost_ratio_stop": "原価率が上限を超えたため、新しい翻訳を開始できません。",
-  "concurrent_limit": "同時接続数の上限に達しています。",
-  "password_change_required": "翻訳を開始する前にパスワードを変更してください。"
+  "Account user not found": "管理画面で顧客アカウントを作成してから利用してください。",
+  account_suspended: "このアカウントは停止中です。",
+  monthly_quota_exhausted: "今月の利用上限に達しています。",
+  daily_quota_exhausted: "本日の利用上限に達しています。",
+  cost_ratio_stop: "原価率が上限を超えています。",
+  concurrent_limit: "同時接続数の上限に達しています。",
+  password_change_required: "利用開始前にパスワードを変更してください。"
 };
 
 function displayErrorMessage(error) {
   const key = String(error || "").trim();
   return ERROR_MESSAGES[key] || key || "リクエストに失敗しました。";
+}
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
 }
 
 async function api(path, options = {}) {
@@ -70,9 +87,7 @@ async function api(path, options = {}) {
     }
   }
   if (!response.ok) {
-    if (response.status === 429) {
-      throw new Error(displayErrorMessage(payload.error || "ログイン試行回数が多すぎます。しばらく待ってから再度お試しください。"));
-    }
+    if (response.status === 429) throw new Error("ログイン試行回数が多すぎます。しばらく待ってください。");
     throw new Error(displayErrorMessage(payload.error));
   }
   return payload;
@@ -105,7 +120,7 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("is-visible");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2000);
+  toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2200);
 }
 
 let confirmCb = null;
@@ -121,13 +136,9 @@ function closeConfirm() {
   confirmCb = null;
 }
 
-function clearCredentialsDialog() {
+function closeCredentialsDialog() {
   if (credId) credId.textContent = "";
   if (credPassword) credPassword.textContent = "";
-}
-
-function closeCredentialsDialog() {
-  clearCredentialsDialog();
   credentialsOverlay?.classList.add("is-hidden");
 }
 
@@ -159,13 +170,7 @@ async function copyId(id, rowEl) {
   const copied = await copyText(id, "IDをコピーしました。", "コピーに失敗しました。");
   if (!copied || !rowEl) return;
   rowEl.classList.add("is-copied");
-  const btn = rowEl.querySelector(".dash-table-copy");
-  const prev = btn?.textContent;
-  if (btn) btn.textContent = "済";
-  setTimeout(() => {
-    rowEl.classList.remove("is-copied");
-    if (btn && prev) btn.textContent = prev;
-  }, 1600);
+  setTimeout(() => rowEl.classList.remove("is-copied"), 1400);
 }
 
 function updateStats(users, visible) {
@@ -178,10 +183,21 @@ function updateStats(users, visible) {
   searchWrap.hidden = total === 0;
 }
 
+function searchableUserText(user) {
+  return [
+    user.id,
+    user.display_name,
+    user.account_name,
+    user.customer_name,
+    user.contact_name,
+    user.account_id
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
 function renderTable(users) {
   state.users = sortUsers(users);
   const query = (userSearch?.value || "").trim().toLowerCase();
-  const filtered = query ? state.users.filter((u) => u.id.toLowerCase().includes(query)) : state.users;
+  const filtered = query ? state.users.filter((u) => searchableUserText(u).includes(query)) : state.users;
 
   updateStats(state.users, filtered.length);
   searchClear.hidden = !query;
@@ -189,9 +205,9 @@ function renderTable(users) {
   if (state.users.length === 0) {
     userTableWrap.innerHTML = `
       <div class="dash-empty">
-        <p class="dash-empty-title">ユーザーがいません</p>
-        <p class="dash-empty-desc">左のフォームからアクセスIDを追加してください。</p>
-        <button class="dash-btn dash-btn-primary" type="button" id="emptyQuickAdd">IDを自動生成して追加</button>
+        <p class="dash-empty-title">アクセスIDがありません</p>
+        <p class="dash-empty-desc">左のフォームから顧客アカウントとアクセスIDを作成してください。</p>
+        <button class="dash-btn dash-btn-primary" type="button" id="emptyQuickAdd">自動生成して作成</button>
       </div>`;
     userTableWrap.querySelector("#emptyQuickAdd")?.addEventListener("click", handleQuickAdd);
     return;
@@ -200,8 +216,8 @@ function renderTable(users) {
   if (filtered.length === 0) {
     userTableWrap.innerHTML = `
       <div class="dash-empty">
-        <p class="dash-empty-title">一致するユーザーがありません</p>
-        <p class="dash-empty-desc">検索条件を変更してください。</p>
+        <p class="dash-empty-title">一致するIDがありません</p>
+        <p class="dash-empty-desc">検索条件を変えてください。</p>
       </div>`;
     return;
   }
@@ -211,70 +227,79 @@ function renderTable(users) {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>アクセスID</th>
-        <th>種別</th>
+        <th>顧客 / アクセスID</th>
+        <th>契約</th>
+        <th>状態</th>
         <th>操作</th>
       </tr>
     </thead>
     <tbody></tbody>`;
   const tbody = table.querySelector("tbody");
 
-  for (const u of filtered) {
+  for (const user of filtered) {
     const tr = document.createElement("tr");
+    const name = user.display_name || user.customer_name || user.id;
+    const account = user.account_name || user.customer_name || "未設定";
+    tr.innerHTML = `
+      <td class="dash-table-id">
+        <strong>${esc(name)}</strong>
+        <span class="dash-muted">${esc(user.id)}</span>
+        <span class="dash-muted">${esc(account)}</span>
+      </td>
+      <td>
+        ${esc(user.plan_id || "-")}
+        <span class="dash-muted">${formatMoney(user.monthly_revenue_jpy || 0)} / 月</span>
+      </td>
+      <td></td>
+      <td class="dash-table-actions"></td>`;
 
-    const idTd = document.createElement("td");
-    idTd.className = "dash-table-id";
-    idTd.textContent = u.id;
-
-    const typeTd = document.createElement("td");
+    const statusTd = tr.children[2];
     const badge = document.createElement("span");
-    badge.className = `dash-table-badge ${u.seeded ? "" : "is-custom"}`.trim();
-    badge.textContent = u.seeded ? "環境設定" : "追加済み";
-    typeTd.appendChild(badge);
-    if (u.mustChangePassword) {
+    badge.className = `dash-table-badge ${user.seeded ? "" : "is-custom"}`.trim();
+    badge.textContent = user.seeded ? "環境設定ID" : "管理追加";
+    statusTd.appendChild(badge);
+    if (user.mustChangePassword) {
       const pendingBadge = document.createElement("span");
       pendingBadge.className = "dash-table-badge is-pending";
-      pendingBadge.textContent = "初回未変更";
+      pendingBadge.textContent = "初期PW未変更";
       pendingBadge.style.marginLeft = "0.35rem";
-      typeTd.appendChild(pendingBadge);
+      statusTd.appendChild(pendingBadge);
     }
 
-    const actionsTd = document.createElement("td");
-    actionsTd.className = "dash-table-actions";
-
+    const actionsTd = tr.querySelector(".dash-table-actions");
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "dash-table-copy";
     copyBtn.textContent = "コピー";
-    copyBtn.addEventListener("click", () => copyId(u.id, tr));
+    copyBtn.addEventListener("click", () => copyId(user.id, tr));
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "dash-table-del";
-    delBtn.setAttribute("aria-label", `${u.id} を削除`);
+    delBtn.setAttribute("aria-label", `${user.id} を削除`);
     delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
-    if (u.seeded) {
+    if (user.seeded) {
       delBtn.disabled = true;
-      delBtn.title = "環境設定で定義されたIDは削除できません。";
+      delBtn.title = "環境設定IDは削除できません。";
     }
     delBtn.addEventListener("click", () => {
-      if (u.seeded) {
-        showToast("環境設定で定義されたIDは削除できません。");
+      if (user.seeded) {
+        showToast("環境設定IDは削除できません。");
         return;
       }
-      showConfirm(`「${u.id}」を削除しますか？`, async () => {
+      showConfirm(`「${user.id}」を削除しますか？`, async () => {
         try {
-          const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(u.id)}`, { method: "DELETE" });
+          const { users: updated } = await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
           showToast("削除しました。");
           renderTable(updated);
-        } catch (e) {
-          showToast(e.message);
+          loadAccounts();
+        } catch (error) {
+          showToast(error.message);
         }
       });
     });
 
     actionsTd.append(copyBtn, delBtn);
-    tr.append(idTd, typeTd, actionsTd);
     tbody.appendChild(tr);
   }
 
@@ -300,7 +325,7 @@ function accountStatusLabel(account) {
   const remaining = Number(account.remaining_seconds || 0);
   const dailyRemaining = Number(account.daily_remaining_seconds || 0);
   if (status !== "active") return "停止中";
-  if (ratio >= 0.45) return "原価率超過";
+  if (ratio >= 0.45) return "原価率注意";
   if (remaining <= 0 || dailyRemaining <= 0) return "上限到達";
   return "利用可能";
 }
@@ -322,7 +347,7 @@ function getAccountPanel() {
     <div class="dash-panel-head">
       <div>
         <h2 class="dash-panel-title">契約アカウント</h2>
-        <p class="dash-panel-desc">契約アカウント別の利用量、原価率、停止状態を確認します。</p>
+        <p class="dash-panel-desc">顧客別の利用量、売上、推定API原価、停止状態を確認します。</p>
       </div>
       <button class="dash-btn dash-btn-icon" id="refreshAccountsBtn" type="button" title="更新" aria-label="更新">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -332,7 +357,7 @@ function getAccountPanel() {
       </button>
     </div>
     <div class="dash-privacy-note">
-      会話本文・翻訳本文・音声・文字起こし本文は保存しません。保存するのは利用分数、日時、アカウント、推定原価などの利用メタデータのみです。
+      利用者側には契約名、残量、原価、売上を表示しません。管理画面だけが顧客台帳と利用量を持ちます。
     </div>
     <div class="dash-table-wrap" id="accountTableWrap">
       <p class="dash-loading"><span class="admin-spinner"></span>読み込み中...</p>
@@ -349,7 +374,7 @@ function renderAccounts(accounts) {
     wrap.innerHTML = `
       <div class="dash-empty">
         <p class="dash-empty-title">契約アカウントはまだありません</p>
-        <p class="dash-empty-desc">ユーザーが最初に翻訳を開始すると、Free Trialの既定アカウントが作成されます。</p>
+        <p class="dash-empty-desc">左のフォームから管理者が顧客アカウントを作成してください。</p>
       </div>`;
     return;
   }
@@ -359,11 +384,11 @@ function renderAccounts(accounts) {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>会社名</th>
+        <th>顧客</th>
         <th>プラン</th>
         <th>利用量</th>
         <th>収益性</th>
-        <th>停止状態</th>
+        <th>状態</th>
         <th>操作</th>
       </tr>
     </thead>
@@ -385,14 +410,15 @@ function renderAccounts(accounts) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>
-        <strong>${account.name || account.id}</strong>
-        <span class="dash-muted">${account.id}</span>
-        ${account.industry === "pharmacy" ? '<span class="dash-muted">薬局: 本文保存OFF固定</span>' : ""}
+        <strong>${esc(account.customer_name || account.name || account.id)}</strong>
+        <span class="dash-muted">${esc(account.name || account.id)}</span>
+        ${account.contact_name ? `<span class="dash-muted">担当: ${esc(account.contact_name)}</span>` : ""}
+        <span class="dash-muted">${esc(account.id)}</span>
       </td>
-      <td>${account.plan_name || account.plan_id}</td>
+      <td>${esc(account.plan_name || account.plan_id)}</td>
       <td>
         今月 ${formatMinutes(used)} / ${formatMinutes(limit)}
-        <span class="dash-muted">今日 ${formatMinutes(dailyUsed)} / ${formatMinutes(dailyLimit)}</span>
+        <span class="dash-muted">本日 ${formatMinutes(dailyUsed)} / ${formatMinutes(dailyLimit)}</span>
         <span class="dash-muted">残り ${formatMinutes(account.remaining_seconds || 0)}</span>
         <span class="dash-muted">予約中 ${formatMinutes(reserved)} / 追加 ${account.adjustment_minutes || 0}分</span>
         <span class="dash-muted">同時接続 ${account.active_sessions || 0}</span>
@@ -407,10 +433,11 @@ function renderAccounts(accounts) {
       </td>
       <td><span class="dash-table-badge ${accountStatusClass(account)}">${accountStatusLabel(account)}</span></td>
       <td class="dash-table-actions"></td>`;
+
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = account.status === "active" ? "dash-table-copy is-danger-action" : "dash-table-copy";
-    toggleBtn.textContent = account.status === "active" ? "停止する" : "再開する";
+    toggleBtn.textContent = account.status === "active" ? "停止" : "再開";
     toggleBtn.addEventListener("click", async () => {
       const next = account.status === "active" ? "suspended" : "active";
       try {
@@ -424,6 +451,7 @@ function renderAccounts(accounts) {
         showToast(error.message);
       }
     });
+
     const quotaForm = document.createElement("form");
     quotaForm.className = "dash-quota-form";
     quotaForm.innerHTML = `
@@ -451,6 +479,7 @@ function renderAccounts(accounts) {
         showToast(error.message);
       }
     });
+
     tr.querySelector(".dash-table-actions").append(toggleBtn, quotaForm);
     tbody.appendChild(tr);
   }
@@ -470,7 +499,7 @@ async function loadAccounts() {
     wrap.innerHTML = `
       <div class="dash-empty">
         <p class="dash-empty-title">利用状況を読み込めません</p>
-        <p class="dash-empty-desc">${error.message}</p>
+        <p class="dash-empty-desc">${esc(error.message)}</p>
       </div>`;
   }
 }
@@ -483,11 +512,11 @@ async function loadUsers(options = {}) {
   try {
     const { users } = await api("/api/admin/users");
     renderTable(users);
-  } catch (e) {
+  } catch (error) {
     userTableWrap.innerHTML = `
       <div class="dash-empty">
         <p class="dash-empty-title">読み込みに失敗しました</p>
-        <p class="dash-empty-desc">${e.message}</p>
+        <p class="dash-empty-desc">${esc(error.message)}</p>
         <button class="dash-btn dash-btn-secondary" type="button" id="retryLoad">再読み込み</button>
       </div>`;
     userTableWrap.querySelector("#retryLoad")?.addEventListener("click", loadUsers);
@@ -499,40 +528,65 @@ function setFormMessage(text, type = "error") {
   addUserMessage.classList.toggle("is-success", type === "success");
 }
 
+function clearCreateForm() {
+  newDisplayName.value = "";
+  newAccountName.value = "";
+  newContactName.value = "";
+  newMonthlyRevenue.value = "";
+  newUserId.value = "";
+  newUserPassword.value = "";
+  newPlanId.value = "lite";
+}
+
 async function handleAddUser() {
   const id = newUserId.value.trim();
+  const displayName = newDisplayName.value.trim();
+  const accountName = newAccountName.value.trim();
+  const contactName = newContactName.value.trim();
   const password = newUserPassword.value.trim();
-  if (!id) {
-    setFormMessage("IDを入力してください。");
+  if (!displayName && !accountName) {
+    setFormMessage("顧客名または会社名を入力してください。");
     return;
   }
+  if (!id) {
+    setFormMessage("アクセスIDを入力してください。");
+    return;
+  }
+
   setFormMessage("");
   addUserBtn.disabled = true;
   quickAddBtn.disabled = true;
   try {
-    const payload = { id };
+    const payload = {
+      id,
+      displayName: displayName || accountName,
+      customerName: displayName || accountName,
+      accountName: accountName || displayName,
+      contactName,
+      planId: newPlanId.value || "lite",
+      monthlyRevenueJpy: Number(newMonthlyRevenue.value || 0)
+    };
     if (password) payload.password = password;
     const result = await api("/api/admin/users", {
       method: "POST",
       body: JSON.stringify(payload)
     });
-    newUserId.value = "";
-    newUserPassword.value = "";
-    setFormMessage(`「${id}」を追加しました。`, "success");
+    clearCreateForm();
+    setFormMessage(`「${id}」を作成しました。`, "success");
     if (result.initialPassword) {
       showCredentialsDialog(id, result.initialPassword);
       await copyText(
-        `ID: ${id}\nパスワード: ${result.initialPassword}`,
-        "クリップボードにコピーしました。",
-        "クリップボードへのコピーに失敗しました。表示中の情報を控えてください。"
+        `アクセスID: ${id}\nパスワード: ${result.initialPassword}`,
+        "認証情報をコピーしました。",
+        "コピーに失敗しました。表示中の認証情報を控えてください。"
       );
     } else {
-      showToast(`「${id}」を追加しました。`);
+      showToast(`「${id}」を作成しました。`);
     }
     renderTable(result.users);
-    await copyId(id);
-  } catch (e) {
-    setFormMessage(e.message);
+    loadAccounts();
+  } catch (error) {
+    setFormMessage(error.message);
   } finally {
     addUserBtn.disabled = false;
     quickAddBtn.disabled = false;
@@ -540,12 +594,16 @@ async function handleAddUser() {
 }
 
 async function handleQuickAdd() {
+  if (!newDisplayName.value.trim() && !newAccountName.value.trim()) {
+    newDisplayName.value = "新規顧客";
+    newAccountName.value = "新規アカウント";
+  }
   newUserId.value = generateAccessId();
   await handleAddUser();
 }
 
-async function handleLogin(e) {
-  e.preventDefault();
+async function handleLogin(event) {
+  event.preventDefault();
   loginError.textContent = "";
   loginBtn.disabled = true;
   loginBtn.textContent = "ログイン中...";
@@ -559,8 +617,8 @@ async function handleLogin(e) {
     });
     adminPasswordInput.value = "";
     showDashboard(user);
-  } catch (err) {
-    loginError.textContent = err.message;
+  } catch (error) {
+    loginError.textContent = error.message;
   } finally {
     loginBtn.disabled = false;
     loginBtn.textContent = "ログイン";
@@ -600,7 +658,9 @@ searchClear?.addEventListener("click", () => {
   renderTable(state.users);
   userSearch.focus();
 });
-newUserId?.addEventListener("keydown", (e) => { if (e.key === "Enter") handleAddUser(); });
+newUserId?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") handleAddUser();
+});
 passwordToggle?.addEventListener("click", () => {
   const show = adminPasswordInput.type === "password";
   adminPasswordInput.type = show ? "text" : "password";
@@ -618,14 +678,10 @@ credCopyBtn?.addEventListener("click", async () => {
   const id = credId?.textContent || "";
   const password = credPassword?.textContent || "";
   if (!id || !password) return;
-  await copyText(
-    `ID: ${id}\nパスワード: ${password}`,
-    "クリップボードにコピーしました。",
-    "クリップボードへのコピーに失敗しました。"
-  );
+  await copyText(`アクセスID: ${id}\nパスワード: ${password}`, "コピーしました。", "コピーに失敗しました。");
 });
-credentialsOverlay?.addEventListener("click", (e) => {
-  if (e.target === credentialsOverlay) closeCredentialsDialog();
+credentialsOverlay?.addEventListener("click", (event) => {
+  if (event.target === credentialsOverlay) closeCredentialsDialog();
 });
 dialogCancel.addEventListener("click", closeConfirm);
 dialogConfirm.addEventListener("click", () => {
@@ -633,11 +689,11 @@ dialogConfirm.addEventListener("click", () => {
   closeConfirm();
   if (cb) cb();
 });
-dialogOverlay.addEventListener("click", (e) => {
-  if (e.target === dialogOverlay) closeConfirm();
+dialogOverlay.addEventListener("click", (event) => {
+  if (event.target === dialogOverlay) closeConfirm();
 });
-window.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
   if (!credentialsOverlay?.classList.contains("is-hidden")) {
     closeCredentialsDialog();
     return;

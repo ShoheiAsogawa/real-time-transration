@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  customer_name TEXT,
+  contact_name TEXT,
+  memo TEXT,
   industry TEXT NOT NULL DEFAULT 'hotel_ryokan',
   plan_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
@@ -48,6 +51,7 @@ CREATE TABLE IF NOT EXISTS account_users (
   location_id TEXT,
   access_id_hash TEXT NOT NULL UNIQUE,
   access_id_label TEXT NOT NULL,
+  display_name TEXT,
   role TEXT NOT NULL DEFAULT 'staff',
   status TEXT NOT NULL DEFAULT 'active',
   created_at INTEGER NOT NULL,

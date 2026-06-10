@@ -492,6 +492,11 @@
   outline: none;
 }
 
+.dash-select,
+input[type="number"].dash-input {
+  font-family: inherit;
+}
+
 .dash-input:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);

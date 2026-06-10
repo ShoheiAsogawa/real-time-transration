@@ -10,6 +10,10 @@ function normalizeId(value) {
       return String(value || "").trim();
 }
 
+function normalizeAdminText(value, fallback = "") {
+      return String(value || "").trim().slice(0, 160) || fallback;
+}
+
 function textBytes(value) {
       return new TextEncoder().encode(value);
 }
@@ -201,6 +205,26 @@ function publicUsers(users) {
               hasPassword: !!passwordHash,
               mustChangePassword: !!mustChangePassword
       }));
+}
+
+async function adminUsersPayload(env, users) {
+      const payload = publicUsers(users);
+      if (!env.DB) return payload;
+      await ensureAdminManagedAccountSchema(env);
+      const db = requireDb(env);
+      for (const user of payload) {
+              const accessIdHash = await sha256(user.id);
+              const row = await db.prepare(
+                    `SELECT u.display_name, u.access_id_label, u.status AS account_user_status,
+                            a.id AS account_id, a.name AS account_name, a.customer_name,
+                            a.contact_name, a.monthly_revenue_jpy, a.plan_id
+                     FROM account_users u
+                     JOIN accounts a ON a.id = u.account_id
+                     WHERE u.access_id_hash = ?`
+              ).bind(accessIdHash).first();
+              if (row) Object.assign(user, row);
+      }
+      return payload;
 }
 
 function userPayload(session) {
@@ -638,6 +662,25 @@ async function seedPlans(env) {
       }
 }
 
+async function ensureAdminManagedAccountSchema(env) {
+      if (!env.DB) return;
+      const statements = [
+            "ALTER TABLE accounts ADD COLUMN customer_name TEXT",
+            "ALTER TABLE accounts ADD COLUMN contact_name TEXT",
+            "ALTER TABLE accounts ADD COLUMN memo TEXT",
+            "ALTER TABLE account_users ADD COLUMN display_name TEXT"
+      ];
+      const db = requireDb(env);
+      for (const statement of statements) {
+              try {
+                    await db.prepare(statement).run();
+              } catch (error) {
+                    const message = String(error?.message || error || "");
+                    if (!message.toLowerCase().includes("duplicate column")) throw error;
+              }
+      }
+}
+
 async function audit(env, actor, action, targetType, targetId, metadata = {}) {
       await requireDb(env).prepare(
             `INSERT INTO admin_audit_logs (id, actor, action, target_type, target_id, created_at, metadata)
@@ -648,39 +691,9 @@ async function audit(env, actor, action, targetType, targetId, metadata = {}) {
 async function getB2bUserForSession(env, session) {
       if (!session?.accessIdHash) return null;
       await seedPlans(env);
+      await ensureAdminManagedAccountSchema(env);
       const db = requireDb(env);
-      let row = await db.prepare(
-            `SELECT u.*, a.status AS account_status, a.plan_id, a.monthly_revenue_jpy, a.cost_per_minute_jpy,
-                    a.model, a.daily_minutes_override, a.monthly_minutes_override,
-                    p.monthly_minutes, p.daily_minutes, p.max_session_seconds, p.max_concurrent_sessions,
-                    p.monthly_price_jpy
-             FROM account_users u
-             JOIN accounts a ON a.id = u.account_id
-             JOIN plans p ON p.id = a.plan_id
-             WHERE u.access_id_hash = ?`
-      ).bind(session.accessIdHash).first();
-      if (row) return row;
-
-      const sourceUser = await findUserForSession(env, session);
-      if (!sourceUser) return null;
-      const timestamp = nowMs();
-      await db.prepare(
-            `INSERT OR IGNORE INTO accounts (
-              id, name, industry, plan_id, status, billing_mode, monthly_revenue_jpy,
-              cost_per_minute_jpy, model, history_retention_mode, created_at, updated_at
-            ) VALUES (?, ?, 'hotel_ryokan', 'free', 'active', 'invoice', 0, 6.5, ?, 'metadata_only', ?, ?)`
-      ).bind("acct_default", "Default Trial Account", env.OPENAI_REALTIME_MODEL || "gpt-realtime", timestamp, timestamp).run();
-      await db.prepare(
-            `INSERT OR IGNORE INTO locations (id, account_id, name, status, created_at, updated_at)
-             VALUES (?, 'acct_default', 'Default Location', 'active', ?, ?)`
-      ).bind("loc_default", timestamp, timestamp).run();
-      await db.prepare(
-            `INSERT OR IGNORE INTO account_users (
-              id, account_id, location_id, access_id_hash, access_id_label, role, status, created_at, updated_at
-            ) VALUES (?, 'acct_default', 'loc_default', ?, ?, 'staff', 'active', ?, ?)`
-      ).bind(`usr_${session.accessIdHash.slice(0, 16)}`, session.accessIdHash, maskAccessId(sourceUser.id), timestamp, timestamp).run();
-
-      row = await db.prepare(
+      return db.prepare(
             `SELECT u.*, a.status AS account_status, a.plan_id, a.monthly_revenue_jpy, a.cost_per_minute_jpy,
                     a.model, a.industry, a.history_retention_mode, a.daily_minutes_override, a.monthly_minutes_override,
                     p.monthly_minutes, p.daily_minutes, p.max_session_seconds, p.max_concurrent_sessions,
@@ -690,7 +703,6 @@ async function getB2bUserForSession(env, session) {
              JOIN plans p ON p.id = a.plan_id
              WHERE u.access_id_hash = ?`
       ).bind(session.accessIdHash).first();
-      return row;
 }
 
 async function closeStaleSessions(env, accountId) {
@@ -1083,19 +1095,7 @@ async function routeApi(request, env) {
   }
 
   if (url.pathname === "/api/me/usage" && request.method === "GET") {
-          const session = await getSession(request, env);
-          if (!session) return json({ error: "Not authenticated" }, 401);
-          const b2bUser = await getB2bUserForSession(env, session);
-          if (!b2bUser) return json({ error: "Account user not found" }, 404);
-          const snapshot = await quotaSnapshot(env, b2bUser.account_id);
-          return json({
-                planId: snapshot.account.plan_id,
-                monthUsedSeconds: snapshot.monthSeconds,
-                dailyUsedSeconds: snapshot.daySeconds,
-                remainingSeconds: Math.max(0, snapshot.monthlyLimitSeconds - snapshot.monthSeconds),
-                dailyRemainingSeconds: Math.max(0, snapshot.dailyLimitSeconds - snapshot.daySeconds),
-                maxSessionSeconds: Number(snapshot.account.max_session_seconds || 180)
-          });
+          return json({ error: "Forbidden" }, 403);
   }
 
   if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
@@ -1103,8 +1103,10 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
           await seedPlans(env);
+          await ensureAdminManagedAccountSchema(env);
           const rows = await requireDb(env).prepare(
-                `SELECT a.id, a.name, a.status, a.industry, a.history_retention_mode, a.plan_id,
+                `SELECT a.id, a.name, a.customer_name, a.contact_name, a.memo,
+                        a.status, a.industry, a.history_retention_mode, a.plan_id,
                         a.monthly_revenue_jpy, a.cost_per_minute_jpy, a.model,
                         p.name AS plan_name, p.monthly_minutes, p.daily_minutes,
                         p.max_concurrent_sessions, p.max_session_seconds
@@ -1168,7 +1170,7 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
           const users = await getUsers(env);
-          return json({ users: publicUsers(users) });
+          return json({ users: await adminUsersPayload(env, users) });
   }
 
   // POST /api/admin/users  ユーザー追加
@@ -1177,7 +1179,8 @@ async function routeApi(request, env) {
           if (!session) return json({ error: "Not authenticated" }, 401);
           if ((session.role || "user") !== "admin") return json({ error: "Forbidden" }, 403);
 
-        const { id, password } = await readJson(request);
+        const body = await readJson(request);
+        const { id, password } = body;
           const normalizedId = normalizeId(id);
           if (!normalizedId || normalizedId.length > 128) {
                     return json({ error: "IDが無効です。" }, 400);
@@ -1194,9 +1197,62 @@ async function routeApi(request, env) {
                     return json({ error: "そのIDはすでに存在します。" }, 409);
           }
           const passwordHash = await createPasswordHash(plainPassword, env);
-          users.push({ id: normalizedId, role: "user", seeded: false, passwordHash, mustChangePassword: true });
+          const displayName = normalizeAdminText(body.displayName, normalizedId);
+          const accountName = normalizeAdminText(body.accountName, displayName);
+          const customerName = normalizeAdminText(body.customerName, displayName);
+          const contactName = normalizeAdminText(body.contactName, "");
+          const planId = ["lite", "standard", "plus"].includes(String(body.planId || "")) ? String(body.planId) : "lite";
+
+          await seedPlans(env);
+          await ensureAdminManagedAccountSchema(env);
+          const db = requireDb(env);
+          const plan = await db.prepare(`SELECT monthly_price_jpy FROM plans WHERE id = ?`).bind(planId).first();
+          const monthlyRevenueJpy = Math.max(0, Math.round(Number(body.monthlyRevenueJpy || 0))) || Number(plan?.monthly_price_jpy || 9800);
+          const timestamp = nowMs();
+          const accountId = `acct_${randomId(10)}`;
+          const locationId = `loc_${randomId(10)}`;
+          const accountUserId = `usr_${randomId(10)}`;
+          await db.prepare(
+                `INSERT INTO accounts (
+                  id, name, customer_name, contact_name, industry, plan_id, status, billing_mode,
+                  monthly_revenue_jpy, cost_per_minute_jpy, model, history_retention_mode,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'hotel_ryokan', ?, 'active', 'invoice', ?, 6.5, ?, 'metadata_only', ?, ?)`
+          ).bind(
+                accountId,
+                accountName,
+                customerName,
+                contactName,
+                planId,
+                monthlyRevenueJpy,
+                env.OPENAI_REALTIME_MODEL || "gpt-realtime",
+                timestamp,
+                timestamp
+          ).run();
+          await db.prepare(
+                `INSERT INTO locations (id, account_id, name, status, created_at, updated_at)
+                 VALUES (?, ?, ?, 'active', ?, ?)`
+          ).bind(locationId, accountId, accountName, timestamp, timestamp).run();
+          await db.prepare(
+                `INSERT INTO account_users (
+                  id, account_id, location_id, access_id_hash, access_id_label,
+                  display_name, role, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'staff', 'active', ?, ?)`
+          ).bind(
+                accountUserId,
+                accountId,
+                locationId,
+                await sha256(normalizedId),
+                maskAccessId(normalizedId),
+                displayName,
+                timestamp,
+                timestamp
+          ).run();
+
+          users.push({ id: normalizedId, role: "user", seeded: false, passwordHash, mustChangePassword: true, displayName, accountName });
           await saveUsers(env, users);
-          return json({ ok: true, users: publicUsers(users), initialPassword: plainPassword });
+          await audit(env, session.label, "user_create", "account", accountId, { accountUserId, accessIdLabel: maskAccessId(normalizedId), planId });
+          return json({ ok: true, users: await adminUsersPayload(env, users), initialPassword: plainPassword });
   }
 
   // DELETE /api/admin/users/:id  ユーザー削除

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AMALINK Translation 管理</title>
     <link rel="icon" href="../logo.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="../styles.css?v=ui-20260610-2" />
-    <link rel="stylesheet" href="admin.css?v=ui-20260610-2" />
+    <link rel="stylesheet" href="../styles.css?v=ui-20260610-3" />
+    <link rel="stylesheet" href="admin.css?v=ui-20260610-3" />
   </head>
   <body class="dash-body">
     <div class="dash-login" id="loginScreen">
@@ -16,7 +16,7 @@
           <span class="dash-login-badge">Admin</span>
         </div>
         <h1 class="dash-login-title">管理ログイン</h1>
-        <p class="dash-login-desc">ダッシュボードにアクセスするには認証が必要です。</p>
+        <p class="dash-login-desc">顧客アカウント、利用量、収益性を管理します。</p>
         <form class="dash-login-form" id="loginForm" autocomplete="on">
           <label class="dash-field">
             <span>メールアドレス</span>
@@ -55,7 +55,7 @@
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/>
               <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
-            ユーザー管理
+            顧客管理
           </button>
         </nav>
       </aside>
@@ -63,8 +63,8 @@
       <div class="dash-main">
         <header class="dash-topbar">
           <div class="dash-topbar-left">
-            <h1 class="dash-page-title">ダッシュボード</h1>
-            <p class="dash-page-sub">アクセスIDの発行とユーザー管理</p>
+            <h1 class="dash-page-title">管理ダッシュボード</h1>
+            <p class="dash-page-sub">顧客名、アクセスID、契約プラン、利用状況を管理します。</p>
           </div>
           <div class="dash-topbar-right">
             <span class="dash-user-chip">
@@ -78,7 +78,7 @@
         <div class="dash-content">
           <div class="dash-stats">
             <div class="dash-stat-card">
-              <span class="dash-stat-label">登録ユーザー</span>
+              <span class="dash-stat-label">登録ID</span>
               <span class="dash-stat-value" id="statTotal">-</span>
             </div>
             <div class="dash-stat-card">
@@ -86,7 +86,7 @@
               <span class="dash-stat-value" id="statSeeded">-</span>
             </div>
             <div class="dash-stat-card">
-              <span class="dash-stat-label">追加済みID</span>
+              <span class="dash-stat-label">管理追加ID</span>
               <span class="dash-stat-value" id="statCustom">-</span>
             </div>
             <div class="dash-stat-card dash-stat-card-accent">
@@ -97,12 +97,21 @@
 
           <div class="dash-panels">
             <section class="dash-panel dash-panel-add">
-              <h2 class="dash-panel-title">新規ユーザーを追加</h2>
-              <p class="dash-panel-desc">IDとパスワードを設定して追加します。空欄ならパスワードを自動生成します。</p>
+              <h2 class="dash-panel-title">顧客アカウントを作成</h2>
+              <p class="dash-panel-desc">管理者だけが顧客名と契約情報を保持します。利用者にはアクセスIDと初期パスワードのみ渡します。</p>
               <div class="dash-add-form">
-                <input class="dash-input" id="newUserId" type="text" placeholder="例: team_7KQ4-9W2P" autocapitalize="none" spellcheck="false" />
+                <input class="dash-input" id="newDisplayName" type="text" placeholder="顧客名・表示名" />
+                <input class="dash-input" id="newAccountName" type="text" placeholder="会社名・店舗名" />
+                <input class="dash-input" id="newContactName" type="text" placeholder="担当者名（任意）" />
+                <select class="dash-input dash-select" id="newPlanId">
+                  <option value="lite">Business Lite</option>
+                  <option value="standard">Business Standard</option>
+                  <option value="plus">Business Plus</option>
+                </select>
+                <input class="dash-input" id="newMonthlyRevenue" type="number" min="0" step="100" placeholder="月額売上（空ならプラン標準）" />
+                <input class="dash-input" id="newUserId" type="text" placeholder="アクセスID 例: team_7KQ4-9W2P" autocapitalize="none" spellcheck="false" />
                 <div class="dash-password-wrap dash-add-password">
-                  <input class="dash-input" id="newUserPassword" type="password" placeholder="パスワード（8文字以上・空欄で自動生成）" autocapitalize="none" spellcheck="false" autocomplete="new-password" />
+                  <input class="dash-input" id="newUserPassword" type="password" placeholder="初期パスワード（空なら自動生成）" autocapitalize="none" spellcheck="false" autocomplete="new-password" />
                   <button class="dash-password-toggle" id="newUserPasswordToggle" type="button" aria-label="パスワードを表示">
                     <svg class="icon-show" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2"/>
@@ -114,10 +123,10 @@
                   </button>
                 </div>
                 <div class="dash-add-actions">
-                  <button class="dash-btn dash-btn-secondary" id="generateIdBtn" type="button">IDを生成</button>
-                  <button class="dash-btn dash-btn-primary" id="addUserBtn" type="button">追加</button>
+                  <button class="dash-btn dash-btn-secondary" id="generateIdBtn" type="button">ID生成</button>
+                  <button class="dash-btn dash-btn-primary" id="addUserBtn" type="button">作成</button>
                 </div>
-                <button class="dash-btn dash-btn-ghost" id="quickAddBtn" type="button">自動生成して追加</button>
+                <button class="dash-btn dash-btn-ghost" id="quickAddBtn" type="button">IDとパスワードを自動生成して作成</button>
                 <p class="dash-form-msg" id="addUserMessage" role="status"></p>
               </div>
             </section>
@@ -125,8 +134,8 @@
             <section class="dash-panel dash-panel-table">
               <div class="dash-panel-head">
                 <div>
-                  <h2 class="dash-panel-title">ユーザー一覧</h2>
-                  <p class="dash-panel-desc">検索・コピー・削除ができます。</p>
+                  <h2 class="dash-panel-title">アクセスID一覧</h2>
+                  <p class="dash-panel-desc">顧客名と会社名は管理画面だけで確認できます。</p>
                 </div>
                 <button class="dash-btn dash-btn-icon" id="refreshBtn" type="button" title="一覧を更新" aria-label="一覧を更新">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -140,8 +149,8 @@
                   <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
                   <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                <input class="dash-search" id="userSearch" type="search" placeholder="IDで検索..." autocapitalize="none" spellcheck="false" />
-                <button class="dash-search-clear" id="searchClear" type="button" aria-label="検索をクリア" hidden>×</button>
+                <input class="dash-search" id="userSearch" type="search" placeholder="ID、顧客名、会社名で検索" autocapitalize="none" spellcheck="false" />
+                <button class="dash-search-clear" id="searchClear" type="button" aria-label="検索をクリア" hidden>x</button>
               </div>
               <div class="dash-table-wrap" id="userTableWrap">
                 <p class="dash-loading"><span class="admin-spinner"></span>読み込み中...</p>
@@ -166,14 +175,14 @@
 
     <div class="dialog-overlay is-hidden" id="credentialsOverlay" role="dialog" aria-modal="true" aria-labelledby="credentialsTitle">
       <div class="dialog dialog-credentials">
-        <h3 class="dialog-credentials-title" id="credentialsTitle">初回認証情報</h3>
-        <p class="dialog-credentials-warning">この画面を閉じるとパスワードは再表示できません。安全な方法でユーザーに共有してください。</p>
+        <h3 class="dialog-credentials-title" id="credentialsTitle">初期認証情報</h3>
+        <p class="dialog-credentials-warning">この画面を閉じるとパスワードは再表示できません。安全な方法で利用者へ共有してください。</p>
         <dl class="dialog-credentials-list">
           <div><dt>アクセスID</dt><dd><code id="credId"></code></dd></div>
           <div><dt>パスワード</dt><dd><code id="credPassword"></code></dd></div>
         </dl>
         <div class="dialog-actions">
-          <button class="dialog-btn cancel" id="credCopyBtn" type="button">クリップボードにコピー</button>
+          <button class="dialog-btn cancel" id="credCopyBtn" type="button">コピー</button>
           <button class="dialog-btn danger" id="credCloseBtn" type="button">閉じる</button>
         </div>
       </div>

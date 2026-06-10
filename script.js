@@ -160,6 +160,7 @@ function applySettingsFromUi() {
 /* API */
 
 const ERROR_MESSAGES = {
+      "Account user not found": "利用開始前の設定が必要です。管理者にお問い合わせください。",
       "Not authenticated": "ログインが必要です。",
       "Forbidden": "この操作を行う権限がありません。",
       "Invalid origin": "このアクセス元からは利用できません。",
