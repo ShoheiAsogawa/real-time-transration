@@ -409,7 +409,7 @@ function renderAccounts(accounts) {
       <td class="dash-table-actions"></td>`;
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
-    toggleBtn.className = account.status === "active" ? "dash-table-del" : "dash-table-copy";
+    toggleBtn.className = account.status === "active" ? "dash-table-copy is-danger-action" : "dash-table-copy";
     toggleBtn.textContent = account.status === "active" ? "停止する" : "再開する";
     toggleBtn.addEventListener("click", async () => {
       const next = account.status === "active" ? "suspended" : "active";

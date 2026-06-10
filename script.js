@@ -34,7 +34,6 @@ const loginForm = document.querySelector("#loginForm");
 const accessIdInput = document.querySelector("#accessId");
 const accessPasswordInput = document.querySelector("#accessPassword");
 const accessPasswordToggle = document.querySelector("#accessPasswordToggle");
-const pasteAccessIdBtn = document.querySelector("#pasteAccessId");
 const authMessage = document.querySelector("#authMessage");
 const loginSubmit = document.querySelector("#loginSubmit");
 const logoutButton = document.querySelector("#logoutButton");
@@ -918,25 +917,6 @@ async function boot() {
       }
 }
 
-async function handlePasteAccessId() {
-      if (!navigator.clipboard?.readText) {
-              showToast("このブラウザでは貼り付けできません。");
-              return;
-      }
-      try {
-              const text = (await navigator.clipboard.readText()).trim();
-              if (!text) {
-                      showToast("クリップボードが空です。");
-                      return;
-              }
-              accessIdInput.value = text;
-              authMessage.textContent = "";
-              accessIdInput.focus();
-      } catch {
-              showToast("クリップボードへのアクセスが拒否されました。");
-      }
-}
-
 async function handleLogin() {
       authMessage.textContent = "";
       loginSubmit.disabled = true;
@@ -976,7 +956,6 @@ async function handleLogout() {
 }
 
 loginForm.addEventListener("submit", (e) => { e.preventDefault(); handleLogin(); });
-if (pasteAccessIdBtn) pasteAccessIdBtn.addEventListener("click", handlePasteAccessId);
 if (accessPasswordToggle) {
       accessPasswordToggle.addEventListener("click", () => {
               const show = accessPasswordInput.type === "password";

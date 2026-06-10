@@ -2201,3 +2201,140 @@ h1 .brand-accent,
     background: #ff3b30;
     color: #fff;
 }
+
+/* Modern auth polish */
+
+.user-auth-view {
+  background:
+    radial-gradient(circle at 50% -8%, rgba(255, 113, 24, 0.14), transparent 18rem),
+    radial-gradient(circle at 10% 100%, rgba(0, 122, 255, 0.1), transparent 18rem),
+    linear-gradient(180deg, #fff8f2 0%, #f7fafc 100%);
+}
+
+.user-auth-card {
+  border-radius: 1rem;
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+}
+
+.user-auth-card .auth-hero {
+  gap: 0.55rem;
+}
+
+.user-auth-card .app-icon,
+.user-auth-card .app-icon svg {
+  width: 4.25rem;
+  height: 4.25rem;
+}
+
+.user-auth-card .app-icon {
+  filter: drop-shadow(0 10px 18px rgba(0, 122, 255, 0.18));
+}
+
+.user-auth-card h1 {
+  max-width: 17rem;
+  text-align: center;
+  font-size: 1.82rem;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.user-auth-card .brand-accent {
+  color: #ff7118;
+}
+
+.user-auth-card .auth-subtitle {
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.user-auth-card .form-group {
+  gap: 0.95rem;
+}
+
+.user-auth-card .form-row {
+  gap: 0.45rem;
+}
+
+.user-auth-card .form-row label {
+  color: #334155;
+  font-size: 0.8rem;
+}
+
+.user-auth-card .form-row input {
+  height: 3rem;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.3);
+  font-size: 1rem;
+}
+
+.user-auth-card .form-row input:focus {
+  border-color: #ff7118;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(255, 113, 24, 0.13);
+}
+
+.user-auth-card .form-row-separator {
+  padding-top: 0.2rem;
+  border-top: none;
+}
+
+.user-auth-card .password-toggle {
+  right: 0.75rem;
+}
+
+.user-auth-card .app-button.primary {
+  height: 3.15rem;
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, #ff7118, #ff8a3d);
+  box-shadow: 0 16px 34px rgba(255, 113, 24, 0.26);
+}
+
+.user-auth-card .auth-footer {
+  color: #94a3b8;
+}
+
+@media (max-width: 480px) {
+  .auth-view {
+    justify-content: flex-start;
+    padding: max(1.4rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .user-auth-card {
+    width: 100%;
+    margin-top: clamp(1rem, 7vh, 4rem);
+    padding: 1.55rem 1.35rem 1.3rem;
+    gap: 1.35rem;
+  }
+
+  .user-auth-card .app-icon,
+  .user-auth-card .app-icon svg {
+    width: 3.65rem;
+    height: 3.65rem;
+  }
+
+  .user-auth-card h1 {
+    max-width: 14rem;
+    font-size: 1.65rem;
+  }
+
+  .user-auth-card .auth-subtitle {
+    font-size: 0.84rem;
+  }
+
+  .user-auth-card .form-row input {
+    height: 3.05rem;
+  }
+
+  .user-auth-card .form-row-submit {
+    margin-top: 0.25rem;
+  }
+
+  .user-auth-card .auth-footer {
+    display: none;
+  }
+}
