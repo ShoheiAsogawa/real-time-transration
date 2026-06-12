@@ -181,7 +181,9 @@ function userPayload(session) {
   return {
     id: session.label,
     role: session.role || "user",
-    mustChangePassword: !!session.mustChangePassword
+    mustChangePassword: !!session.mustChangePassword,
+    historyScope: session.accessIdHash || null,
+    historyRetention: "metadata_only"
   };
 }
 
@@ -954,6 +956,7 @@ async function routeApi(req, res) {
     const id = crypto.randomBytes(18).toString("base64url");
     usageSessions.set(id, {
       id,
+      userAccessIdHash: session.accessIdHash,
       userLabel: session.label,
       status: "active",
       startedAt: Date.now(),
@@ -982,7 +985,7 @@ async function routeApi(req, res) {
     requireAllowedPayload(await readJson(req), new Set(["activeAudioSeconds", "silenceSeconds"]));
     const id = decodeURIComponent(url.pathname.split("/")[3]);
     const usage = usageSessions.get(id);
-    if (!usage || usage.status !== "active" || usage.userLabel !== session.label) {
+    if (!usage || usage.status !== "active" || usage.userAccessIdHash !== session.accessIdHash) {
       json(res, 404, { error: "translation session is not active" });
       return;
     }
@@ -1015,7 +1018,7 @@ async function routeApi(req, res) {
     const { reason } = endPayload;
     const id = decodeURIComponent(url.pathname.split("/")[3]);
     const usage = usageSessions.get(id);
-    if (!usage || usage.userLabel !== session.label) {
+    if (!usage || usage.userAccessIdHash !== session.accessIdHash) {
       json(res, 404, { error: "translation session not found" });
       return;
     }
@@ -1143,7 +1146,7 @@ async function routeApi(req, res) {
       return;
     }
     const usage = usageSessions.get(sessionId);
-    if (!usage || usage.status !== "active" || usage.userLabel !== session.label) {
+    if (!usage || usage.status !== "active" || usage.userAccessIdHash !== session.accessIdHash) {
       json(res, 403, { error: "translation session is not active" });
       return;
     }

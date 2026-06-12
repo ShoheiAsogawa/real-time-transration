@@ -1,4 +1,4 @@
-const HISTORY_KEY = "lingualive_history_v2";
+const HISTORY_KEY_PREFIX = "lingualive_history_v3";
 const SETTINGS_KEY = "lingualive_settings_v1";
 const DEVICE_ID_KEY = "ll_device_id";
 
@@ -16,6 +16,8 @@ const settings = loadSettings();
 
 const state = {
       pc: null, dc: null, stream: null, user: null,
+      historyScope: null,
+      historyRetention: "metadata_only",
       turns: [], activeTurn: null,
       sessionId: null, sessionStartedAt: null,
       translationSessionId: null,
@@ -254,7 +256,26 @@ function guessSpeakerSide(text) {
 
 /* Authentication / screen switching */
 
+function applyUserContext(user) {
+      const nextScope = user?.historyScope || null;
+      const scopeChanged = state.historyScope && nextScope && state.historyScope !== nextScope;
+      state.historyScope = nextScope;
+      state.historyRetention = user?.historyRetention || "metadata_only";
+      if (scopeChanged) resetConversation({ skipSave: true });
+}
+
+function historyStorageKey() {
+      if (!state.historyScope) return null;
+      return `${HISTORY_KEY_PREFIX}:${state.historyScope}`;
+}
+
+function canPersistHistoryContent() {
+      // metadata_only = server-side policy only; device history stays scoped per user
+      return Boolean(state.historyScope);
+}
+
 function setAuthenticated(user) {
+      applyUserContext(user);
       state.user = user;
       authView.classList.add("is-hidden");
       translatorView.classList.remove("is-hidden");
@@ -302,17 +323,24 @@ async function checkSessionStillValid() {
       try {
               const { user } = await api("/api/me");
               if (user.role === "admin") setLoggedOut("管理者セッションです。一般ユーザーとして再度ログインしてください。");
-              else state.user = user;
+              else {
+                        applyUserContext(user);
+                        state.user = user;
+              }
       } catch {
               if (state.user) setLoggedOut("セッションが終了しました。再度ログインしてください。");
       }
 }
 
 function setLoggedOut(message = "") {
+      if (state.pc) stopRealtime("ログアウトしました。");
       state.user = null;
+      state.historyScope = null;
+      state.historyRetention = "metadata_only";
       state.passwordGateForced = false;
       passwordOverlay?.classList.add("is-hidden");
       closeDrawer();
+      resetConversation({ skipSave: true });
       authView.classList.remove("is-hidden");
       translatorView.classList.add("is-hidden");
       authMessage.textContent = message;
@@ -341,6 +369,7 @@ async function handlePasswordChange(event) {
                         body: JSON.stringify({ currentPassword: current, newPassword: next })
               });
               state.user = user;
+              applyUserContext(user);
               state.passwordGateForced = false;
               passwordOverlay?.classList.add("is-hidden");
               if (currentPasswordInput) currentPasswordInput.value = "";
@@ -434,12 +463,13 @@ function handleRealtimeEvent(event) {
       if (event.type === "error") setStatus(event.error?.message || "Realtime API error");
 }
 
-function resetConversation() {
-      saveCurrentSession();
+function resetConversation(options = {}) {
+      if (!options.skipSave) saveCurrentSession();
       state.turns = []; state.activeTurn = null;
       state.sessionId = null; state.sessionStartedAt = null;
       state.viewingHistory = false;
       renderConversation();
+      renderSessionList();
       updateLiveUi();
 }
 
@@ -565,23 +595,36 @@ function renderConversation() {
 /* History */
 
 function loadHistory() {
-      try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { return []; }
+      const key = historyStorageKey();
+      if (!key) return [];
+      try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; }
 }
 
 function saveHistory(list) {
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 100))); } catch {}
+      const key = historyStorageKey();
+      if (!key) return;
+      try { localStorage.setItem(key, JSON.stringify(list.slice(0, 100))); } catch {}
 }
 
 function saveCurrentSession() {
+      if (!historyStorageKey()) return;
       const meaningful = state.turns.filter((t) => t.original || t.translation);
       if (!state.sessionId || meaningful.length === 0) return;
       const list = loadHistory();
-      const record = { id: state.sessionId, startedAt: state.sessionStartedAt, updatedAt: Date.now(),
-                          turns: meaningful.map((t) => ({ original: t.original, translation: t.translation, speakerSide: t.speakerSide || "self" })) };
+      const record = {
+              id: state.sessionId,
+              startedAt: state.sessionStartedAt,
+              updatedAt: Date.now(),
+              turnCount: meaningful.length,
+              turns: canPersistHistoryContent()
+                        ? meaningful.map((t) => ({ original: t.original, translation: t.translation, speakerSide: t.speakerSide || "self" }))
+                        : []
+      };
       const index = list.findIndex((s) => s.id === state.sessionId);
       if (index >= 0) list[index] = record; else list.unshift(record);
       list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      saveHistory(list); renderSessionList();
+      saveHistory(list);
+      renderSessionList();
 }
 
 function dayLabel(ts) {
@@ -616,13 +659,15 @@ function renderSessionList() {
                         sessionList.appendChild(header); lastDay = day;
               }
               const first = session.turns[0] || {};
-              const preview = (first.original || first.translation || "会話").replace(/\s+/g, " ").trim();
+              const preview = canPersistHistoryContent()
+                        ? (first.original || first.translation || "会話").replace(/\s+/g, " ").trim()
+                        : `利用記録 (${session.turnCount || session.turns.length || 0}件)`;
               const item = document.createElement("button");
               item.type = "button"; item.className = "session-item";
               if (session.id === state.sessionId) item.classList.add("is-active");
               const title = document.createElement("span"); title.className = "session-title"; title.textContent = preview;
               const meta = document.createElement("span"); meta.className = "session-meta";
-              meta.textContent = `${timeLabel(session.updatedAt || session.startedAt)} ・ ${session.turns.length}件`;
+              meta.textContent = `${timeLabel(session.updatedAt || session.startedAt)} ・ ${session.turnCount || session.turns.length || 0}件`;
               item.append(title, meta);
               item.addEventListener("click", () => loadSession(session.id));
               sessionList.appendChild(item);
@@ -634,6 +679,10 @@ function loadSession(id) {
       saveCurrentSession();
       const session = loadHistory().find((s) => s.id === id);
       if (!session) return;
+      if (!session.turns?.length) {
+              showToast("保存された会話内容がありません。");
+              return;
+      }
       state.turns = session.turns.map((t) => ({
               original: t.original,
               translation: t.translation,

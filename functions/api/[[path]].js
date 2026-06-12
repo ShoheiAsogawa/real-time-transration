@@ -231,8 +231,20 @@ function userPayload(session) {
       return {
               id: session.label,
               role: session.role || "user",
-              mustChangePassword: !!session.mustChangePassword
+              mustChangePassword: !!session.mustChangePassword,
+              historyScope: session.accessIdHash || null,
+              historyRetention: "metadata_only"
       };
+}
+
+async function userPayloadForClient(env, session) {
+      const payload = userPayload(session);
+      if ((session.role || "user") !== "user" || !session.accessIdHash || !env.DB) return payload;
+      try {
+              const b2bUser = await getB2bUserForSession(env, session);
+              if (b2bUser?.history_retention_mode) payload.historyRetention = b2bUser.history_retention_mode;
+      } catch {}
+      return payload;
 }
 
 async function findUserForSession(env, session) {
@@ -862,7 +874,7 @@ async function routeApi(request, env) {
   if (url.pathname === "/api/me" && request.method === "GET") {
           const session = await getSession(request, env);
           if (!session) return json({ error: "Not authenticated" }, 401);
-          return json({ user: userPayload(session) });
+          return json({ user: await userPayloadForClient(env, session) });
   }
 
   // /api/login
@@ -879,7 +891,7 @@ async function routeApi(request, env) {
                     return json({ error: "アクセスIDまたはパスワードが正しくありません。" }, 401);
           }
           const { session, cookie } = await setSession(request, env, accessId, String(deviceId).trim());
-          return json({ user: userPayload(session) }, 200, { "Set-Cookie": cookie });
+          return json({ user: await userPayloadForClient(env, session) }, 200, { "Set-Cookie": cookie });
   }
 
   // POST /api/password  パスワード変更（KV のハッシュを更新）
@@ -917,7 +929,7 @@ async function routeApi(request, env) {
 
           const rotated = await rotateUserSession(request, env, session, user.id);
           return json(
-                    { ok: true, user: userPayload(rotated.session) },
+                    { ok: true, user: await userPayloadForClient(env, rotated.session) },
                     200,
                     { "Set-Cookie": rotated.cookie }
           );
@@ -1263,17 +1275,44 @@ async function routeApi(request, env) {
 
         const targetId = decodeURIComponent(url.pathname.replace("/api/admin/users/", ""));
 
-        if (envList(env, "ALLOWED_LOGIN_IDS").some((id) => idsMatch(id, targetId))) {
-                  return json({ error: "環境設定で定義されたIDは削除できません。" }, 403);
-        }
-
         const users = await getUsers(env);
           const filtered = users.filter((u) => !idsMatch(u.id, targetId));
           if (filtered.length === users.length) return json({ error: "ユーザーが見つかりません" }, 404);
           const removed = users.find((u) => idsMatch(u.id, targetId));
-          if (removed) await revokeUserDeviceBinding(env, removed.id);
+          if (removed?.seeded) return json({ error: "環境設定で定義されたIDは削除できません。" }, 403);
+          if (removed) {
+                    await revokeUserDeviceBinding(env, removed.id);
+                    if (env.DB) {
+                              await ensureAdminManagedAccountSchema(env);
+                              const db = requireDb(env);
+                              const accessIdHash = await sha256(targetId);
+                              const accountUser = await db.prepare(
+                                        `SELECT id, account_id FROM account_users WHERE access_id_hash = ?`
+                              ).bind(accessIdHash).first();
+                              if (accountUser) {
+                                        const timestamp = nowMs();
+                                        await db.prepare(
+                                                  `UPDATE usage_sessions
+                                                   SET status = 'ended', ended_at = ?, stop_reason = 'user_deleted', updated_at = ?
+                                                   WHERE user_id = ? AND status = 'active'`
+                                        ).bind(timestamp, timestamp, accountUser.id).run();
+                                        await db.prepare(`DELETE FROM account_users WHERE id = ?`).bind(accountUser.id).run();
+                                        const remaining = await db.prepare(
+                                                  `SELECT COUNT(*) AS count FROM account_users WHERE account_id = ?`
+                                        ).bind(accountUser.account_id).first();
+                                        if (Number(remaining?.count || 0) === 0) {
+                                                  await db.prepare(`DELETE FROM usage_events WHERE session_id IN (SELECT id FROM usage_sessions WHERE account_id = ?)`).bind(accountUser.account_id).run();
+                                                  await db.prepare(`DELETE FROM usage_sessions WHERE account_id = ?`).bind(accountUser.account_id).run();
+                                                  await db.prepare(`DELETE FROM usage_daily_rollups WHERE account_id = ?`).bind(accountUser.account_id).run();
+                                                  await db.prepare(`DELETE FROM quota_adjustments WHERE account_id = ?`).bind(accountUser.account_id).run();
+                                                  await db.prepare(`DELETE FROM locations WHERE account_id = ?`).bind(accountUser.account_id).run();
+                                                  await db.prepare(`DELETE FROM accounts WHERE id = ?`).bind(accountUser.account_id).run();
+                                        }
+                              }
+                    }
+          }
           await saveUsers(env, filtered);
-          return json({ ok: true, users: publicUsers(filtered) });
+          return json({ ok: true, users: await adminUsersPayload(env, filtered) });
   }
 
   return json({ error: "Not found" }, 404);
